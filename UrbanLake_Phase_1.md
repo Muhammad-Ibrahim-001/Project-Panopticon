@@ -1,8 +1,18 @@
-# Phase 1 Project Proposal
+<div align="center">
+  <h2 style="color: #0056b3;">FAST-NUCES</h2>
+  <h3 style="color: #333333;">DS3001 - Data Analysis and Visualization</h3>
+  <h4 style="color: #666666;">Section: BDS-5B</h4>
+  <br>
+  <h1>Phase 1 Project Proposal</h1>
+  <h2 style="color: #2e8b57;">Urban Traffic and Air Pollution: An End-to-End Distributed Data Engineering Pipeline</h2>
+</div>
 
-## Project Title
+---
 
-# Urban Traffic and Air Pollution: An End-to-End Distributed Data Engineering Pipeline
+> [!NOTE]  
+> **Project Team**  
+> * **Muhammad Ibrahim** (24L-2602)  
+> * **Safi Akmal** (23L-2556)  
 
 ---
 
