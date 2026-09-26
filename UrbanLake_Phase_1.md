@@ -237,9 +237,10 @@ The exact volume will be finalized after source profiling because API response s
 
 ### Traffic Data
 
-TfL road-status and disruption data will be collected for a substantial set of London roads/corridors.
+TfL road-status and disruption data will be collected for all 24 major TfL corridors (Red Routes).
 
 The historical extraction will be divided into manageable date ranges and API requests to avoid oversized responses.
+Estimated volume: **500 MB – 2 GB** depending on historical depth.
 
 ### Air-Quality Data
 
@@ -830,7 +831,7 @@ urban-traffic-air-pollution/
     └── phase1_proposal.md
 ```
 
-The final GitHub repository URL will be added to the submitted Phase 1 document.
+GitHub Repository: [https://github.com/Muhammad-Ibrahim-001/UrbanLake](https://github.com/Muhammad-Ibrahim-001/UrbanLake)
 
 ---
 
