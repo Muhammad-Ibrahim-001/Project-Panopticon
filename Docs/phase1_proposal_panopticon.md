@@ -14,7 +14,7 @@
 **Target Platform**: Apache Spark on Databricks Community Edition / Azure Cloud  
 **Submission Phase**: Phase 1 Deliverables (Domain, Architecture, Governance & FinOps)  
 **Submission Date**: September 27, 2026  
-**GitHub Repository Link**: `https://github.com/Muhammad-Ibrahim-001/UrbanLake`  
+**GitHub Repository Link**: `https://github.com/Muhammad-Ibrahim-001/Project-Panopticon`  
 
 ---
 
