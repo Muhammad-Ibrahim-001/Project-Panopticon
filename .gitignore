@@ -1,0 +1,14 @@
+# Temporary Office lock files
+~$*
+*.tmp
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.class
+.ipynb_checkpoints/
+
+# Virtual environments
+.env/
+venv/
+env/

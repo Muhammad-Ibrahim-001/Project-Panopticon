@@ -148,7 +148,7 @@ The following verified sample payloads are maintained in the repository under `/
 
 ### 3.1 Identification of Sensitive Telemetry & PII
 A forensic audit of raw OONI network probes identifies high-risk metadata. Because probes are executed by human activists, investigative journalists, and volunteer citizens inside restrictive territories, exposure of this data poses severe legal and physical threats:
-* `probe_ip`: The public IP address of the testing client (direct PII under GDPR Article 4).
+* `resolver_ip`: The public IP address of the local ISP DNS resolver (e.g., 202.163.69.18), which identifies the user's localized city and neighborhood routing infrastructure.\n* `probe_ip`: Redacted upstream by OONI collectors to 127.0.0.1 for mobile safety; retained in historical/private probes.
 * `probe_asn`: Autonomous System Number indicating the exact local ISP and geographic routing zone.
 * `probe_city` / `probe_cc`: The localized geographic presence of the tester.
 * `input`: The tested target URL, which may contain sensitive political, religious, or investigative research paths.

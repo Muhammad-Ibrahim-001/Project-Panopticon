@@ -58,5 +58,17 @@ esolver_ip) are pseudonymized using HMAC-SHA256 before writing to the Silver lay
 
 ---
 
-## 📄 Documentation
-For the complete technical breakdown, mathematical formulas, and cloud sizing estimations, see [Docs/phase1_proposal.md](Docs/phase1_proposal.md).
+## 📚 Comprehensive Project Documentation
+
+All formal technical documentation and implementation manuals are organized in the [Docs/](Docs/) directory:
+
+| Document | Description & Contents |
+| :--- | :--- |
+| [**Docs/phase1_proposal.md**](Docs/phase1_proposal.md) | **Formal Phase 1 Academic Proposal** (Course requirements, Sizing, Medallion modeling). |
+| [**Docs/phase1_proposal.docx**](Docs/phase1_proposal.docx) | **Executive Word Document Version** with high-resolution visual diagrams and tables. |
+| [**Docs/01_architectures_and_tech_stacks.md**](Docs/01_architectures_and_tech_stacks.md) | **Architecture & Tech Stack Evaluation** (Databricks vs. Local vs. Azure trade-offs). |
+| [**Docs/02_phased_implementation_and_work_division.md**](Docs/02_phased_implementation_and_work_division.md) | **Phased Sprint Plan & Teammate Work Division** (Tasks for Muhammad & Safee). |
+| [**Docs/03_core_data_engineering_curriculum.md**](Docs/03_core_data_engineering_curriculum.md) | **8 Core Data Engineering Superpowers** (PySpark JSON explode, Delta CDC, Z-Order). |
+| [**Docs/04_interview_guide_and_academic_defense.md**](Docs/04_interview_guide_and_academic_defense.md) | **Interview & Defense Guide** (STAR story, resume bullet points, 5 tough Q&A answers). |
+| [**Docs/05_deployment_guide_and_troubleshooting.md**](Docs/05_deployment_guide_and_troubleshooting.md) | **Production Operations Manual** (Databricks setup, OOM mitigation, S3 503 fix). |
+
