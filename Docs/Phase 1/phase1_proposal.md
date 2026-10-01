@@ -28,9 +28,9 @@ In modern geopolitical conflict and authoritarian governance, digital communicat
 ```mermaid
 flowchart TB
     subgraph SOURCING ["Data Sources & Ingestion"]
-        S1["Source 1: OONI Network Telemetry<br/>(AWS S3 Open Data: 10 GB Full + 1.8 GB Daily)"]
-        S2["Source 2: Citizen Lab URL Categories<br/>(GitHub Catalog: 100K+ Classified URLs)"]
-        S3["Source 3: MaxMind / RIPE ASN Database<br/>(Autonomous System IP-to-ISP Mapping)"]
+        S1["Source 1: OONI Network Telemetry<br/>(AWS S3 Open Data: s3://ooni-data-eu-fra/<br/>~500 MB Baseline + ~35 MB Daily Delta)"]
+        S2["Source 2: Citizen Lab URL Categories<br/>(GitHub Catalog: github.com/citizenlab/test-lists<br/>670+ Classified URLs per Country)"]
+        S3["Source 3: MaxMind / RIPE ASN Database<br/>(S3 Open Data: s3://ooni-data-eu-fra/ip2country-as/)"]
     end
 
     subgraph BRONZE ["Bronze Layer: Raw Ingestion"]
@@ -40,7 +40,7 @@ flowchart TB
     end
 
     subgraph SILVER ["Silver Layer: Cleansed, Conformed & Enriched"]
-        S_CLEAN["PySpark Transformations:<br/>• HMAC-SHA256 IP Pseudonymization<br/>• Explode Nested Test Keys (DNS/TCP/TLS)<br/>• Tampering Vector Classification<br/>• Delta Lake MERGE INTO (CDC / Deduplication)"]
+        S_CLEAN["PySpark Transformations:<br/>• HMAC-SHA256 IP Pseudonymization<br/>• Explode Nested Test Keys (DNS/TCP/TLS)<br/>• Tampering Vector Classification<br/>• Delta Lake MERGE INTO (3-Day Rolling Lookback & Deduplication)"]
         S_TABLES[("silver_network_incidents<br/>Enriched with Citizen Lab & ASN Context")]
     end
 
@@ -86,61 +86,76 @@ The chosen domain is **Cybersecurity Forensics, Digital Human Rights, and Geopol
 
 When civil unrest, military invasions, or controversial elections occur, state-controlled telecommunication monopolies alter national routing tables and packet inspection policies. Traditional monitoring is fragmented; non-governmental organizations (NGOs), journalists, and international regulators require automated, near-real-time digital forensics to distinguish between generic infrastructure failures and state-sponsored digital censorship.
 
-### 1.2 Exact Data Sources
-To construct an enterprise-grade lakehouse, our architecture ingests one primary Big Data telemetry source combined with two contextual reference sources:
+### 1.2 Exact Data Sources & Endpoints
+To construct an enterprise-grade lakehouse, our architecture ingests one primary Big Data telemetry source combined with two contextual reference sources, verified against original live production repositories:
 
 1. **Primary Telemetry Source (Big Data Stream)**:
    * **Organization**: [Open Observatory of Network Interference (OONI)](https://ooni.org/).
-   * **Access Endpoint**: Hosted publicly via the **AWS Open Data Registry** (`s3://ooni-data/`) and queryable via the OONI Measurement API (`https://api.ooni.io/api/v1/measurements`).
-   * **Data Format**: Semi-structured, deeply nested JSON lines (`.json.gz`).
-   * **Payload Contents**: Complete network probe traces capturing DNS resolution queries, TCP three-way handshake attempts, TLS cryptographic negotiation logs, and HTTP response headers across 200+ countries.
+   * **Direct S3 Bucket Endpoint**: AWS Open Data Registry S3 bucket **`s3://ooni-data-eu-fra/`** (Region: `eu-central-1`).
+     * Direct HTTPS Gateway: `https://ooni-data-eu-fra.s3.eu-central-1.amazonaws.com/` (Public read access, no credentials required via `--no-sign-request`).
+     * Partition Key Hierarchy: `jsonl/<test_name>/<probe_cc>/<YYYYMMDD>/<HH>/<filename>.jsonl.gz` (e.g., `jsonl/webconnectivity/PK/20200104/00/20200104_PK_webconnectivity.l.0.jsonl.gz`).
+   * **Direct REST API Endpoint**: [OONI Measurement API](https://api.ooni.io/api/v1/measurements) (e.g., `https://api.ooni.io/api/v1/measurements?probe_cc=PK&limit=50`) and Raw Measurement Resolver (`https://api.ooni.io/api/v1/raw_measurement?measurement_uid=<uid>`).
+   * **Data Format**: Semi-structured, deeply nested JSON lines compressed with gzip (`.jsonl.gz`).
+   * **Payload Contents**: Deep network probe traces capturing DNS resolution queries (`queries`, `answers`, `ttl`), TCP three-way handshake attempts (`tcp_connect`), TLS cryptographic negotiation logs (`tls_handshakes`), and HTTP response headers/body blocks.
 
 2. **Context Enrichment Source 1 (Target Classification)**:
    * **Organization**: [Citizen Lab (Munk School of Global Affairs, University of Toronto)](https://citizenlab.ca/).
    * **Access Endpoint**: [Citizen Lab Test Lists Repository](https://github.com/citizenlab/test-lists).
-   * **Data Format**: Structured CSV files per country code.
+     * Direct Raw CSV URL: `https://raw.githubusercontent.com/citizenlab/test-lists/master/lists/<country_code>.csv` (e.g., `https://raw.githubusercontent.com/citizenlab/test-lists/master/lists/pk.csv`).
+   * **Data Format**: Structured CSV files per country code (670+ classified URLs for Pakistan alone).
    * **Payload Contents**: Standardized URL mappings classified into 31 sociological categories (e.g., `NEWS`, `POLITICAL_OPPOSITION`, `CIRCUMVENTION_TOOLS`, `HUMAN_RIGHTS`, `RELIGION`).
 
 3. **Context Enrichment Source 2 (Infrastructure Mapping)**:
-   * **Organization**: MaxMind GeoLite2 & RIPE NCC Network Coordination Centre.
-   * **Access Endpoint**: Public Autonomous System Numbers (ASN) directory.
-   * **Data Format**: Tabular TSV/CSV.
-   * **Payload Contents**: Maps raw network autonomous system identifiers (e.g., `AS44244`) to commercial corporate entities (e.g., *Irancell*, *Rostelecom*, *Turkcell*).
+   * **Organization**: MaxMind GeoLite2, IP2Location & RIPE NCC Network Coordination Centre.
+   * **Access Endpoint**: Direct S3 Open Data storage under `s3://ooni-data-eu-fra/ip2country-as/` (e.g., `20180206-ip2country_as.mmdb.gz`) and public ASN directory.
+   * **Data Format**: Tabular TSV/CSV and binary MMDB.
+   * **Payload Contents**: Maps raw network autonomous system identifiers (e.g., `AS9541`, `AS17557`) to commercial corporate entities (e.g., *Cybernet*, *PTCL*, *Nayatel*, *Rostelecom*).
 
 ### 1.3 Ingestion Pattern: Full Load vs. Incremental Load
 * **Full Load (Historical Baseline)**:
-  * Ingests a continuous historical window spanning **5 to 7 consecutive days** across high-surveillance regions (e.g., Eastern Europe, Middle East, Southeast Asia).
+  * Ingests a continuous historical window spanning **5 to 7 consecutive days** across high-surveillance focus regions (e.g., Pakistan `PK`, Iran `IR`, Russia `RU`) during designated geopolitical disruption windows.
   * Establishes baseline normal network behavior (standard latency, baseline DNS failure rates, expected server response codes).
-* **Incremental Load (Change Data Capture / Periodic Batch)**:
-  * Ingests daily 24-hour partitions published to the OONI S3 registry.
-  * Captures newly emerging blocks, domain un-blockings, and infrastructure dropouts.
-  * Employs Delta Lake's `MERGE INTO` construct to reconcile measurement status, identify state changes, and update slowly changing dimensions (SCD Type 2) without reprocessing historical baseline partitions.
+* **Incremental Load (Change Data Capture / Rolling Lookback Batch)**:
+  * Ingests a **rolling 3-day lookback window ($T-3$ to $T$)** from the OONI S3 registry.
+  * **Why a 3-Day Rolling Window?** Because raw OONI telemetry is immutable event logs, probes in authoritarian regions frequently operate on mobile devices (Android/iOS) over throttled or disconnected networks; measurements are queued locally and uploaded days later. Reading a 3-day sliding window captures late-arriving measurements.
+  * Employs Delta Lake's `MERGE INTO` construct on `measurement_id`:
+    1. **Late-Arriving Telemetry**: New measurements for $T-3$ uploaded today take the `WHEN NOT MATCHED INSERT` branch.
+    2. **Dimensional Re-Enrichment**: For existing records, `WHEN MATCHED UPDATE` updates enriched analytical fields (`content_category`, `tampering_vector`, `human_rights_risk_tier`) when Citizen Lab updates its taxonomy or when tampering classification heuristics are refined.
+    3. **Idempotent Recovery**: Multiple runs over the exact same date range never produce duplicate records.
 
 ---
 
 ## 2. Data Samples & Volume
 
 ### 2.1 Sample Files in Version Control
-The following verified sample payloads are maintained in the repository under `/data/samples/`:
-1. `sample_full_load_ooni.json` (~50 MB): Contains ~45,000 raw, uncompressed network probe records capturing heterogeneous test types (`web_connectivity`, `dns_consistency`, `tcp_connect`, `tls_handshake`).
-2. `sample_incremental_ooni.json` (~20 MB): Contains ~18,000 subsequent 24-hour probe records demonstrating state transitions (websites transitioning from normal to tampered).
-3. `sample_citizenlab_categories.csv` (~2 MB): Reference taxonomy mapping target URLs to categorical definitions.
+The repository maintains verified, lightweight telemetry payloads under `/data/samples/` for local testing, parsing validation, and CI/CD sanity checks:
+1. `sample_full_load_ooni.json` (~222 KB): Full-fidelity JSON payload (15 heterogeneous probe runs) capturing diverse test types (`psiphon`, `echcheck`, `facebook_messenger`, `signal`, `tor`, `stunreachability`, `http_header_field_manipulation`).
+2. `sample_incremental_ooni.json` (~865 KB): Multi-event JSON payload (10 probe runs) demonstrating web connectivity blocks and messaging throttling (`web_connectivity`, `whatsapp`, `telegram`).
+3. `sample_citizenlab_categories.csv` (~68 KB): Complete Citizen Lab URL categorization taxonomy (670+ classified domains across 31 sociological categories).
 
-### 2.2 Volume & Cadence Sizing
+### 2.2 Volume & Cadence Sizing (Empirically Validated)
+An empirical benchmark of production OONI S3 archives reveals that raw `.jsonl.gz` files expand by **5.44x** into uncompressed JSON text, with individual measurement records averaging **17.2 KB to 90 KB** due to extensive protocol traces (`network_events`, `queries`, `tcp_connect`). 
 
-| Metric Category | Full Load Baseline | Daily Incremental Load | Monthly Projected Volume |
+To guarantee high-performance execution without memory exhaustion on cloud free tiers, the dataset is scoped to strategic censorship focus countries (e.g., Pakistan `PK`, Iran `IR`, Russia `RU`):
+
+| Metric Category | Full Load Baseline (5-7 Day Focus) | Daily Incremental Load (3-Day Lookback) | Monthly Projected Volume |
 | :--- | :--- | :--- | :--- |
-| **Raw File Size (JSON)** | **9.8 GB to 10.5 GB** | **1.6 GB to 2.1 GB / day** | ~50 GB to 65 GB |
-| **Record Count (Rows)** | ~12,000,000 to 15,000,000 | ~2,000,000 to 2,800,000 | ~75,000,000 |
-| **Delta Lake Compressed Size** | **~1.9 GB to 2.3 GB** | **~350 MB to 450 MB / day** | ~11 GB to 13 GB |
-| **Ingestion Cadence** | One-time initial bootstrap | Daily micro-batch (24h window) | Continuous scheduled cron |
+| **Compressed S3 Archive (`.gz`)** | **~400 MB to 600 MB** | **~25 MB to 50 MB / day** | ~1.0 GB to 1.5 GB |
+| **Uncompressed Raw JSON Text** | **~2.2 GB to 3.2 GB** | **~140 MB to 270 MB / day** | ~5.5 GB to 8.0 GB |
+| **Record Count (Rows)** | **~35,000 to 60,000 measurements** | **~2,000 to 5,000 / day** | ~90,000 to 150,000 |
+| **Delta Lake Compressed Size** | **~80 MB to 130 MB** | **~5 MB to 10 MB / day** | ~250 MB to 350 MB |
+| **Ingestion Cadence** | One-time initial historical bootstrap | Daily scheduled micro-batch ($T-3$ to $T$) | Continuous scheduled cron |
 
-### 2.3 Cloud Feasibility & Memory Safeguards
-* **The Scale Dilemma**: A raw 10 GB JSON dataset will expand to 25+ GB in JVM heap memory if read naively with eager schema inference, immediately crashing the 15 GB RAM ceiling of Databricks Community Edition or exhausting student credits on Azure.
-* **The Engineering Solution**:
-  1. **Strict Columnar Storage & Snappy Compression**: Writing Bronze directly to Delta Lake collapses repetitive JSON keys and whitespace, achieving a ~78% storage reduction.
-  2. **Streaming Ingestion with Chunked Triggers**: The initial 10 GB baseline is ingested via Spark Structured Streaming utilizing `.option("maxBytesPerTrigger", "512mb")`, processing the volume across sequential micro-batches without spiking driver heap memory.
-  3. **Partition Pruning**: Tables are physically partitioned by `measurement_date` (`PARTITIONED BY (measurement_date)`). Incremental loads exclusively touch the target date partition, ignoring the 10 GB historical files during query joins.
+### 2.3 Cloud Feasibility & Memory Safeguards (Databricks Free Tier)
+* **The Databricks Community Edition Reality**:
+  * **Compute Limits**: Single driver node, **0 worker nodes**, **15 GB total RAM** (~9.5 GB usable Spark JVM heap), **2 virtual cores**, and a **2 GB hard limit on DBFS web UI file uploads**.
+  * Loading an uncompressed 10+ GB JSON dataset with eager schema inference would require 30–50 GB JVM heap during array explodes and wide shuffles, immediately causing `java.lang.OutOfMemoryError: Java heap space`.
+* **The Verified Engineering Safeguards**:
+  1. **Right-Sized Scoped Ingestion**: Scoping the baseline to ~500 MB compressed (~35k–60k deep records) provides rigorous Big Data scale while remaining comfortably inside the 9.5 GB JVM heap limit.
+  2. **Direct Schema-on-Read**: Eliminates expensive schema inference passes over raw JSON by enforcing explicit PySpark `StructType` contracts.
+  3. **Snappy Columnar Compression**: Persisting Bronze and Silver to Delta Lake compresses repetitive JSON keys by ~75%, reducing memory pressure during joins and shuffles.
+  4. **Shuffle Partition Tuning**: Setting `spark.sql.shuffle.partitions = 16` eliminates the scheduling overhead of Spark's 200 default partitions on a 2-core node.
+  5. **Partition Pruning**: Tables are physically partitioned by `measurement_date` (`PARTITIONED BY (measurement_date)`). Ingestion touches only the active lookback window partitions, leaving historical partitions untouched.
 
 ---
 
@@ -148,11 +163,11 @@ The following verified sample payloads are maintained in the repository under `/
 
 ### 3.1 Identification of Sensitive Telemetry & PII
 A forensic audit of raw OONI network probes identifies high-risk metadata. Because probes are executed by human activists, investigative journalists, and volunteer citizens inside restrictive territories, exposure of this data poses severe legal and physical threats:
-* `resolver_ip`: The public IP address of the local ISP DNS resolver (e.g., 202.163.69.18), which identifies the user's localized city and neighborhood routing infrastructure.\n* `probe_ip`: Redacted upstream by OONI collectors to 127.0.0.1 for mobile safety; retained in historical/private probes.
+* `resolver_ip`: The public IP address of the local ISP DNS resolver (e.g., 202.163.69.18), which identifies the user's localized city and neighborhood routing infrastructure.
+* `probe_ip`: Redacted upstream by OONI collectors to 127.0.0.1 for mobile safety; retained in historical/private probes.
 * `probe_asn`: Autonomous System Number indicating the exact local ISP and geographic routing zone.
 * `probe_city` / `probe_cc`: The localized geographic presence of the tester.
 * `input`: The tested target URL, which may contain sensitive political, religious, or investigative research paths.
-* `resolver_ip`: The local DNS resolver used, which can trace back to specific university, corporate, or residential subnets.
 
 ### 3.2 High-Level Governance & Privacy Strategy
 Data protection policies are enforced at the **Bronze $\rightarrow$ Silver transition boundary**; no unmasked PII is permitted into Silver or Gold analytical layers.
@@ -292,7 +307,7 @@ The Gold layer provides high-performance, analytics-ready tables modeled in a **
 │  PANOPTICON: GLOBAL INTERNET CENSORSHIP & CYBER SURVEILLANCE WATCHTOWER       [Filter: Country | Date] │
 ├───────────────────┬────────────────────┬────────────────────────┬──────────────────────────────────────┤
 │  TOTAL PROBE TESTS│ ANOMALY BLOCK RATE │ CRITICAL BLACKOUT ZONES│ DOMINANT ATTACK VECTOR               │
-│     14,820,491    │       28.4%        │      8 COUNTRIES       │ TCP RST Injection (54.2%)            │
+│       58,420      │       28.4%        │      3 COUNTRIES       │ TCP RST Injection (54.2%)            │
 ├───────────────────┴────────────────────┴────────────────────────┴──────────────────────────────────────┤
 │  VISUAL 1: GLOBAL CENSORSHIP SEVERITY MAP                   │ VISUAL 2: ATTACK VECTOR BREAKDOWN        │
 │  (Interactive Choropleth: Green = Free, Red = Severe)       │ (100% Stacked Bar: By Country & ISP)     │
@@ -336,30 +351,41 @@ The Gold layer provides high-performance, analytics-ready tables modeled in a **
 The project repository is configured to maintain strict separation of concerns, test scripts, and documentation:
 
 ```text
-project-panopticon-lakehouse/
-├── README.md
-├── LICENSE
-├── docs/
-│   ├── phase1_proposal.md
-│   ├── data_dictionary.md
-│   └── architecture_diagram.png
+Project-Panopticon/
+├── README.md                                  # Executive lakehouse guide & project overview
+├── .gitignore                                 # Git ignore rules
+├── Docs/                                      # Structured documentation suite
+│   ├── .docx/                                 # Formatted Word documents for academic submission
+│   │   └── phase1_proposal.docx               # Executive Word Document Version
+│   ├── Phase 1/                               # Phase 1: Inception & Domain Proposal
+│   │   └── phase1_proposal.md                 # Formal Phase 1 Project Proposal
+│   ├── Phase 2/                               # Phase 2: Ingestion, Silver & Governance
+│   │   ├── phase2_implementation_plan.md      # Technical blueprint & instructor requirements
+│   │   ├── 06_data_dictionary.md              # Comprehensive Bronze & Silver Data Dictionaries
+│   │   └── 07_execution_guide.md              # Parameterized execution & backfill manual
+│   ├── Future & Reference/                    # Architecture, Curriculum & Defense Guides
+│   │   ├── 01_architectures_and_tech_stacks.md # Architecture & Cloud Trade-Off Evaluation
+│   │   ├── 02_phased_implementation_and_work_division.md # Sprint Plan & Work Division
+│   │   ├── 03_core_data_engineering_curriculum.md # 8 Core DE Lakehouse Superpowers
+│   │   ├── 04_interview_guide_and_academic_defense.md # STAR Stories & Defense Q&A
+│   │   └── 05_deployment_guide_and_troubleshooting.md # Operations Manual & OOM Mitigation
+│   └── assets/                                # Visual architecture & schema artifacts
+│       ├── architecture_diagram.png           # High-resolution Lakehouse Architecture
+│       └── star_schema_diagram.png            # Dimensional Star Schema Entity Diagram
 ├── data/
-│   ├── samples/
-│   │   ├── sample_full_load_ooni.json
-│   │   ├── sample_incremental_ooni.json
-│   │   └── sample_citizenlab_categories.csv
-│   └── schemas/
-│       ├── bronze_ooni_schema.json
-│       └── silver_conformed_schema.json
-├── notebooks/
-│   ├── 01_bronze_ingestion_streaming.py
-│   ├── 02_silver_cleaning_anonymization.py
-│   └── 03_gold_dimensional_modeling.py
-├── pipelines/
-│   ├── incremental_daily_ingest.py
-│   └── delta_maintenance_vacuum.py
-└── configs/
-    └── spark_cluster_config.yaml
+│   ├── samples/                             # Version-controlled sample payloads
+│   │   ├── sample_full_load_ooni.json       # Baseline probe telemetry fixture
+│   │   ├── sample_incremental_ooni.json     # Incremental probe telemetry fixture
+│   │   └── sample_citizenlab_categories.csv # Citizen Lab target taxonomy
+│   └── schemas/                             # Explicit schema contract definitions
+│       ├── bronze_ooni_schema.json          # Bronze PySpark StructType JSON contract
+│       └── silver_conformed_schema.json     # Silver Conformed StructType JSON contract
+└── notebooks/                               # Implementation PySpark pipelines
+    ├── 00_audit_logger.py                   # Operational run logging framework
+    ├── 01_bronze_ingestion.py               # Schema-on-read raw ingestion & quarantine
+    ├── 02_silver_transformation.py          # PII masking, flattening & Delta MERGE
+    ├── 03_gold_dimensional_modeling.py     # Analytical Star Schema & Aggregations
+    └── run_pipeline.py                      # Parameterized pipeline execution runner
 ```
 
 ### 6.2 FinOps & Cloud Resource Optimization Strategy

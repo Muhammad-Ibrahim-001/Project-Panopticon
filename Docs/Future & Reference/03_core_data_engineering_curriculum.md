@@ -66,24 +66,31 @@ df_exploded_dns = df_bronze.select(
 
 ---
 
-## 3. Change Data Capture (CDC) via Delta Lake `MERGE INTO` (SCD Type 2)
-* **The Problem**: Network blocks are not static. A website blocked on Monday may be unblocked on Tuesday or experience DNS tampering followed by full TCP RST injection. Appending data naively creates duplicate rows; overwriting historical tables destroys longitudinal evidence.
-* **The Core DE Feature**: Idempotent upserting using Delta Lake's ACID `MERGE INTO`.
+## 3. Late Arrivals, Re-Enrichment & Idempotency via Delta Lake `MERGE INTO`
+* **The Problem**: Raw telemetry observations are immutable event logs—upstream OONI never alters a historical measurement. However:
+  1. *Late Arrivals*: Probes in censored regions frequently store test results offline and sync days later.
+  2. *Dimensional Re-Enrichment*: As Citizen Lab updates domain categories or tampering classification heuristics improve, enriched columns in the Silver layer must be refreshed without re-ingesting raw files.
+  3. *Idempotent Retries*: Re-running a batch must never create duplicate records.
+* **The Core DE Feature**: Idempotent upserting using Delta Lake's ACID `MERGE INTO` scanning a 3-day rolling lookback window.
 * **PySpark Code Pattern**:
 ```python
 from delta.tables import DeltaTable
 
-silver_delta = DeltaTable.forPath(spark, "/mnt/lakehouse/silver/network_incidents")
+silver_delta = DeltaTable.forPath(spark, "/mnt/lakehouse/silver/network_measurements")
 
-# Upsert incremental batch into Silver layer
+# Upsert rolling 3-day window into Silver layer
 silver_delta.alias("target").merge(
-    source=df_incremental_batch.alias("source"),
-    condition="target.measurement_uid = source.measurement_uid"
+    source=df_staged_lookback_batch.alias("source"),
+    condition="target.measurement_id = source.measurement_id"
 ).whenMatchedUpdate(
+    condition="target.content_category != source.content_category OR target.tampering_vector != source.tampering_vector OR target._batch_id != source._batch_id",
     set={
-        "verification_status": "source.verification_status",
+        "content_category": "source.content_category",
+        "category_description": "source.category_description",
+        "human_rights_risk_tier": "source.human_rights_risk_tier",
         "tampering_vector": "source.tampering_vector",
-        "updated_at": "current_timestamp()"
+        "load_timestamp": "current_timestamp()",
+        "_batch_id": "source._batch_id"
     }
 ).whenNotMatchedInsertAll(
 ).execute()
@@ -117,7 +124,7 @@ df_silver = df_bronze.withColumn(
 ---
 
 ## 5. Broadcast Joins for Multi-Source Context Enrichment
-* **The Problem**: Joining 15 million telemetry records with the Citizen Lab URL taxonomy across a distributed Spark cluster causes expensive shuffle exchanges across network sockets.
+* **The Problem**: Joining tens of thousands of forensic telemetry records with the Citizen Lab URL taxonomy across a distributed Spark cluster causes expensive shuffle exchanges across network sockets if executed via default sort-merge join.
 * **The Core DE Feature**: Utilizing Spark's `broadcast()` hint to distribute the small dimension table (~2 MB) to all executors, eliminating data shuffling entirely.
 * **PySpark Code Pattern**:
 ```python
@@ -139,12 +146,17 @@ df_enriched = df_silver.join(
 * **PySpark Code Pattern**:
 ```python
 from pyspark.sql.window import Window
-from pyspark.sql.functions import avg, stddev, lag
+from pyspark.sql.functions import avg, stddev, lag, col
 
 # Partition by ISP and order by hourly timestamp
 window_spec = Window.partitionBy("probe_asn").orderBy("measurement_hour").rowsBetween(-24, 0)
 
-df_anomaly = df_silver.withColumn("rolling_avg_failure", avg("failure_flag").over(window_spec))                       .withColumn("rolling_stddev", stddev("failure_flag").over(window_spec))                       .withColumn("z_score", (col("failure_flag") - col("rolling_avg_failure")) / col("rolling_stddev"))
+df_anomaly = (
+    df_silver
+    .withColumn("rolling_avg_failure", avg("failure_flag").over(window_spec))
+    .withColumn("rolling_stddev", stddev("failure_flag").over(window_spec))
+    .withColumn("z_score", (col("failure_flag") - col("rolling_avg_failure")) / col("rolling_stddev"))
+)
 ```
 
 ---

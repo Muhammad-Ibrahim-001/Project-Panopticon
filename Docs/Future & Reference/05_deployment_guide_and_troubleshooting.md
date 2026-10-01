@@ -41,16 +41,17 @@ Import the notebooks from the repository into your Databricks workspace:
 
 ## 2. Known Technical Setbacks & Troubleshooting Guide
 
-### Failure Mode 1: `java.lang.OutOfMemoryError: Java heap space`
+### Failure Mode 1: `java.lang.OutOfMemoryError: Java heap space` (Community Edition Heap Exhaustion)
 * **Symptoms**: Cluster driver terminates abruptly; logs show executor heap exhaustion during JSON read or wide transformations.
-* **Root Cause**: Attempting to run `spark.read.json()` directly on 10 GB of uncompressed data with default `inferSchema=True`.
+* **Root Cause**: Attempting to read multi-gigabyte raw JSON files on Databricks Community Edition (15 GB total RAM, ~9.5 GB usable Spark heap). Production `.jsonl.gz` expands by **5.44x** into raw JSON text, and raw JSON expands by another 2x–3x into JVM objects during array exploding.
 * **Fix**:
-  1. Define an explicit `StructType` schema.
-  2. Ingest via micro-batches:
+  1. Scope baseline to strategic focus countries (~400 MB – 600 MB compressed / ~35k–60k deep records).
+  2. Define an explicit `StructType` schema (never use `inferSchema=True`).
+  3. Ingest via bounded micro-batches:
      ```python
      df = spark.readStream.format("json").schema(explicit_schema).option("maxBytesPerTrigger", "512mb").load("...")
      ```
-  3. Ensure `spark.sql.shuffle.partitions` is set to `16` (not 200).
+  4. Ensure `spark.sql.shuffle.partitions` is set to `16` (not default 200).
 
 ### Failure Mode 2: AWS S3 503 "SlowDown" / Rate Limiting Errors
 * **Symptoms**: Read job fails with `AmazonS3Exception: 503 Slow Down`.
@@ -79,6 +80,13 @@ Import the notebooks from the repository into your Databricks workspace:
     ```sql
     OPTIMIZE fact_network_anomaly ZORDER BY (country_code, date_key, asn_id);
     ```
+
+### Failure Mode 5: Delta MERGE Redundancy (`rows_updated = 0`) on Immutable Telemetry
+* **Symptoms**: Incremental batch runs always report `rows_updated = 0`, and late-arriving measurements from mobile probes are lost or ignored.
+* **Root Cause**: OONI measurements are immutable event logs. When an incremental batch only reads single-day partition $T$, all records are net-new, making `WHEN MATCHED UPDATE` dead code. Furthermore, mobile probes that synced days late are missed.
+* **Fix**:
+  * Implement a **3-day rolling lookback window ($T-3$ to $T$)** in the pipeline runner (`--lookback-days 3`).
+  * In the Delta `MERGE INTO` statement, specify conditional `whenMatchedUpdate` to update enriched attributes (`content_category`, `tampering_vector`, `human_rights_risk_tier`) when Citizen Lab taxonomies evolve, while using `whenNotMatchedInsertAll()` to ingest late-arriving records.
 
 ---
 

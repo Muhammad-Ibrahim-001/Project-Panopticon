@@ -10,7 +10,7 @@ Choosing the right architecture and technology stack is the most critical decisi
 
 ## 1. Architectural Options Comparison
 
-`
+```text
 +---------------------------------------------------------------------------------------------------------+
 | ARCHITECTURE 1: Cloud-Native Databricks Delta Lakehouse (Recommended & Selected)                        |
 |   Storage: AWS S3 Open Data / DBFS  -->  Compute: Apache Spark 3.5  -->  Format: Delta Lake ACID       |
@@ -21,7 +21,7 @@ Choosing the right architecture and technology stack is the most critical decisi
 | ARCHITECTURE 3: Enterprise Azure Modern Data Platform (MDP)                                             |
 |   Storage: ADLS Gen2  -->  Compute: Azure Synapse / Databricks  -->  Orchestrator: Azure Data Factory   |
 +---------------------------------------------------------------------------------------------------------+
-`
+```
 
 ---
 
@@ -31,7 +31,7 @@ Choosing the right architecture and technology stack is the most critical decisi
 * **Storage Layer**: **Delta Lake 3.0** with ACID transactions, Schema Enforcement, and Time Travel.
 * **Serving**: Databricks SQL Analytics / Direct Parquet Export to Power BI Desktop.
 * **Pros**:
-  * **Zero Cost (.00)**: Operates 100% within Databricks Community Edition free tier.
+  * **Zero Cost ($0.00)**: Operates 100% within Databricks Community Edition free tier.
   * **Native Delta Lake Optimizations**: Built-in support for MERGE INTO, OPTIMIZE, and Z-ORDER BY.
   * **No Cloud Billing Risks**: Prevents student credit exhaustion.
   * **Industry Relevance**: Databricks is the dominant enterprise Lakehouse platform.
@@ -65,7 +65,7 @@ Choosing the right architecture and technology stack is the most critical decisi
   * True enterprise production setup simulating a Fortune 500 data platform.
   * Native integration with Microsoft Entra ID (Azure AD) and Power BI Service.
 * **Cons**:
-  * **Cost Burn Risk**: A multi-node Spark cluster burns through the  Azure for Students credit in 2–3 weeks if auto-termination is improperly configured.
+  * **Cost Burn Risk**: A multi-node Spark cluster burns through the $100 Azure for Students credit in 2–3 weeks if auto-termination is improperly configured.
   * Over-engineering overhead for Phase 1 and Phase 2 milestones.
 
 ---
@@ -75,7 +75,7 @@ Choosing the right architecture and technology stack is the most critical decisi
 | Architectural Layer | Selected Technology | Alternative Evaluated | Why the Selected Tech Wins |
 | :--- | :--- | :--- | :--- |
 | **Distributed Compute** | **Apache Spark 3.5 (PySpark)** | DuckDB / Polars | Handles multi-gigabyte polymorphic JSON with distributed array exploding; standard for enterprise data engineering. |
-| **Table Storage Format** | **Delta Lake 3.0** | Apache Iceberg / Plain Parquet | ACID compliance, native MERGE INTO for Change Data Capture (CDC), and Z-ORDER clustering out-of-the-box on Databricks. |
+| **Table Storage Format** | **Delta Lake 3.0** | Apache Iceberg / Plain Parquet | ACID compliance, native MERGE INTO for rolling lookback reconciliation (late arrivals & dimensional re-enrichment), and Z-ORDER clustering out-of-the-box on Databricks. |
 | **Data Governance / PII** | **PySpark Crypto (sha2, HMAC)** | Manual Python Regex | Operates at distributed scale across worker partitions without collecting data to the driver node. |
 | **Orchestration** | **Databricks Workflows / Cron** | Apache Airflow | Native zero-cost scheduling on Databricks without maintaining an external Airflow webserver and metadata DB. |
 | **Serving & BI** | **Power BI Desktop** | Tableau / Superset | Native direct connector to Parquet/Delta tables, superior choropleth geospatial mapping, and industry standard in enterprise BI. |
@@ -84,7 +84,7 @@ Choosing the right architecture and technology stack is the most critical decisi
 
 ## 3. Chosen Production Blueprint Specification
 
-`
+```text
 [Raw Sources: OONI S3 + Citizen Lab GitHub + RIPE ASN]
                        |
                        v
@@ -99,7 +99,7 @@ Choosing the right architecture and technology stack is the most critical decisi
          +----------------------------+
          | SILVER: Cleansed & Conformed
          | Normalized Events, Cleaned |
-         | Delta MERGE INTO (CDC)     |
+         | Delta MERGE (Lookback+SCD) |
          +----------------------------+
                        |
      Spark SQL: Star Schema Aggregations,
@@ -113,4 +113,4 @@ Choosing the right architecture and technology stack is the most critical decisi
                        |
                        v
          [Power BI Executive Watchtower]
-`
+```

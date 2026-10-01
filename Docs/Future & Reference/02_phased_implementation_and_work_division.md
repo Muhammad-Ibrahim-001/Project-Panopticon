@@ -14,7 +14,7 @@
 
 To ensure balanced accountability and maximum learning across distributed systems, data modeling, and visualization, work is divided across two functional leads:
 
-```
+```text
 +-------------------------------------------------------+-------------------------------------------------------+
 | LEAD 1: Muhammad Ibrahim (24L-2602)                  | LEAD 2: Safee Akmal (23L-2556)                        |
 | Role: Distributed Systems & Lakehouse Architect       | Role: Data Governance & Analytics Engineer            |
@@ -43,7 +43,7 @@ To ensure balanced accountability and maximum learning across distributed system
 ### Phase 2: Core Ingestion, Transformations & Silver Delta Layer (Due: 10 Oct 2026)
 * **Sprint 2.1: Bronze Ingestion Pipeline**:
   * Implement `01_bronze_ingestion_streaming.py` in PySpark.
-  * Ingest the 10 GB baseline using `spark.readStream` or chunked micro-batches (`maxBytesPerTrigger = 512MB`).
+  * Ingest the scoped ~500 MB baseline using explicit `StructType` Schema-on-Read in bounded micro-batches (`maxBytesPerTrigger = 512MB`).
   * Attach ingestion audit columns (`_ingestion_timestamp`, `_source_file`, `_batch_id`).
   * Save to `bronze_ooni_raw` Delta table partitioned by date.
 * **Sprint 2.2: Cleansing & PII Cryptographic Sanitization**:
@@ -53,9 +53,9 @@ To ensure balanced accountability and maximum learning across distributed system
 * **Sprint 2.3: Exploding & Relational Flattening**:
   * Unpack nested arrays: `test_keys.queries`, `test_keys.tcp_connect`, and `test_keys.network_events`.
   * Classify tampering attacks into clean labels (`DNS_TAMPERING`, `TCP_RST_INJECTION`, `TLS_DROP`, `HTTP_BLOCK`).
-* **Sprint 2.4: Reference Joins & Incremental CDC Engine**:
+* **Sprint 2.4: Reference Joins & Incremental Rolling Lookback CDC Engine**:
   * Broadcast join with Citizen Lab URL categories and ASN lookup tables.
-  * Implement Delta Lake `MERGE INTO` to handle daily incremental loads and update existing record statuses idempotently.
+  * Implement Delta Lake `MERGE INTO` with a 3-day rolling lookback window ($T-3$ to $T$) to reconcile late-arriving mobile probe measurements and update enriched taxonomy idempotently.
   * Phase 2 Deliverable: Working Databricks notebook with reproducible Bronze and Silver pipeline runs.
 
 ### Phase 3: Gold Layer Modeling, BI Dashboards & Final Defense (Due: 24 Oct 2026)
@@ -79,8 +79,8 @@ To ensure balanced accountability and maximum learning across distributed system
 
 | Week | Target Focus | Lead Assigned | Deliverable Artifact | Acceptance Criteria |
 | :--- | :--- | :--- | :--- | :--- |
-| **Week 1** (Sep 28 - Oct 04) | Bronze Ingestion & Streaming Setup | Muhammad Ibrahim | `notebooks/01_bronze_ingestion.py` | Successfully reads 10 GB from S3 in < 512MB chunks without OOM errors. |
+| **Week 1** (Sep 28 - Oct 04) | Bronze Ingestion & Streaming Setup | Muhammad Ibrahim | `notebooks/01_bronze_ingestion.py` | Successfully reads scoped baseline from S3 without OOM errors. |
 | **Week 1** (Sep 28 - Oct 04) | PII Masking & Reference Load | Safee Akmal | `notebooks/02_silver_cleaning.py` | 100% of resolver IPs hashed; 0 raw PII leaked into Silver; Citizen Lab 100% join match. |
-| **Week 2** (Oct 05 - Oct 10) | Silver Transformations & CDC | Both Leads | `notebooks/02_silver_cdc_merge.py` | Delta `MERGE INTO` updates daily delta payload in < 60 seconds. |
+| **Week 2** (Oct 05 - Oct 10) | Silver Transformations & CDC | Both Leads | `notebooks/02_silver_cdc_merge.py` | Delta `MERGE INTO` reconciles 3-day lookback window in < 60 seconds with zero duplicates. |
 | **Week 3** (Oct 11 - Oct 17) | Gold Dimensional Model & Marts | Muhammad Ibrahim | `notebooks/03_gold_modeling.py` | Star Schema generated; Gold aggregation tables query in < 2 seconds. |
 | **Week 4** (Oct 18 - Oct 24) | Power BI Dashboard & Video Defense | Safee Akmal | `dashboards/Panopticon_Dashboard.pbix` | Interactive cross-filtering on country click; all 4 visual charts fully operational. |

@@ -1,0 +1,169 @@
+{
+  "title": "Panopticon Silver Conformed Measurements Schema",
+  "description": "Cleansed, normalized, PII-sanitized, and Citizen-Lab-enriched schema contract for silver_network_measurements",
+  "type": "struct",
+  "fields": [
+    {
+      "name": "measurement_id",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Primary Key: SHA256 deterministic hash of report_id, input, and measurement_start_time" }
+    },
+    {
+      "name": "report_id",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Foreign provenance key back to OONI raw probe" }
+    },
+    {
+      "name": "event_timestamp",
+      "type": "timestamp",
+      "nullable": false,
+      "metadata": { "comment": "Standardized UTC timestamp of measurement start" }
+    },
+    {
+      "name": "measurement_date",
+      "type": "date",
+      "nullable": false,
+      "metadata": { "comment": "Physical partition column (YYYY-MM-DD)" }
+    },
+    {
+      "name": "target_url",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Sanitized target URL with authentication tokens and query credentials scrubbed" }
+    },
+    {
+      "name": "target_domain",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Clean second-level domain name (e.g. bbc.com) used for joins" }
+    },
+    {
+      "name": "probe_asn",
+      "type": "long",
+      "nullable": false,
+      "metadata": { "comment": "Cleaned numeric Autonomous System Number (e.g. 9541)" }
+    },
+    {
+      "name": "probe_cc",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "ISO 3166-1 alpha-2 country code" }
+    },
+    {
+      "name": "probe_network_name",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Normalized telecom provider / ISP name" }
+    },
+    {
+      "name": "masked_probe_subnet",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Anonymized /24 IPv4 subnet prefix (e.g. 192.168.1.0/24)" }
+    },
+    {
+      "name": "hashed_resolver_ip",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Cryptographic salted HMAC-SHA256 pseudonymized DNS resolver identifier" }
+    },
+    {
+      "name": "resolver_asn",
+      "type": "long",
+      "nullable": true,
+      "metadata": { "comment": "Cleaned numeric resolver ASN" }
+    },
+    {
+      "name": "test_name",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Network test name" }
+    },
+    {
+      "name": "tampering_vector",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Classification: DNS_TAMPERING, TCP_RESET, TLS_DROP, HTTP_BLOCK, or BENIGN" }
+    },
+    {
+      "name": "is_anomaly",
+      "type": "boolean",
+      "nullable": false,
+      "metadata": { "comment": "Boolean indicator flag: true if network interference was detected" }
+    },
+    {
+      "name": "dns_anomaly_flag",
+      "type": "integer",
+      "nullable": false,
+      "metadata": { "comment": "1 if DNS tampering detected, else 0" }
+    },
+    {
+      "name": "tcp_anomaly_flag",
+      "type": "integer",
+      "nullable": false,
+      "metadata": { "comment": "1 if TCP reset / block detected, else 0" }
+    },
+    {
+      "name": "tls_anomaly_flag",
+      "type": "integer",
+      "nullable": false,
+      "metadata": { "comment": "1 if TLS handshake interference detected, else 0" }
+    },
+    {
+      "name": "http_anomaly_flag",
+      "type": "integer",
+      "nullable": false,
+      "metadata": { "comment": "1 if HTTP block page status detected, else 0" }
+    },
+    {
+      "name": "dns_experiment_failure",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "DNS failure message" }
+    },
+    {
+      "name": "http_experiment_failure",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "HTTP failure message" }
+    },
+    {
+      "name": "duration_seconds",
+      "type": "double",
+      "nullable": true,
+      "metadata": { "comment": "Execution duration in seconds" }
+    },
+    {
+      "name": "content_category",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Citizen Lab category code (NEWS, POL, CIRCUMVENTION, UNCATEGORIZED)" }
+    },
+    {
+      "name": "category_description",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Human-readable Citizen Lab category description" }
+    },
+    {
+      "name": "human_rights_risk_tier",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Risk assessment tier: HIGH, MEDIUM, LOW" }
+    },
+    {
+      "name": "load_timestamp",
+      "type": "timestamp",
+      "nullable": false,
+      "metadata": { "comment": "Audit: UTC timestamp when record was upserted into Silver" }
+    },
+    {
+      "name": "_batch_id",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Audit: Processing batch identifier" }
+    }
+  ]
+}
