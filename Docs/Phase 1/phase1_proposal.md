@@ -115,12 +115,14 @@ To construct an enterprise-grade lakehouse, our architecture ingests one primary
 * **Full Load (Historical Baseline)**:
   * Ingests a continuous historical window spanning **5 to 7 consecutive days** across high-surveillance focus regions (e.g., Pakistan `PK`, Iran `IR`, Russia `RU`) during designated geopolitical disruption windows.
   * Establishes baseline normal network behavior (standard latency, baseline DNS failure rates, expected server response codes).
-* **Incremental Load (Change Data Capture / Rolling Lookback Batch)**:
-  * Ingests a **rolling 3-day lookback window ($T-3$ to $T$)** from the OONI S3 registry.
-  * **Why a 3-Day Rolling Window?** Because raw OONI telemetry is immutable event logs, probes in authoritarian regions frequently operate on mobile devices (Android/iOS) over throttled or disconnected networks; measurements are queued locally and uploaded days later. Reading a 3-day sliding window captures late-arriving measurements.
+  * **FinOps Justification**: A full OONI country archive spans multiple years and terabytes. The 5-7 day baseline (~400–600 MB compressed, ~35K–60K records) is deliberately scoped to run within the Databricks Community Edition 15 GB RAM ceiling. This is explicitly a cost-constrained Free Tier engineering trade-off, not an architectural limitation.
+* **Incremental Load (True High-Watermark + Late-Arrival Reconciliation)**:
+  * The **primary incremental mechanism** is a strict **high-watermark load**: the pipeline fetches only records where `measurement_start_time > last_successful_batch_watermark`. This is CDC-compliant behavior — only net-new records are fetched on each scheduled run.
+  * A **secondary late-arrival reconciliation pass** additionally reads a **3-day rolling lookback window ($T-3$ to $T$)**. This is necessary because OONI probes in authoritarian regions (Iran, Myanmar) operate on intermittent mobile networks and queue measurements locally, uploading them days after collection. The rolling window ensures these delayed records are not permanently missed.
+  * These are two distinct and complementary mechanisms — not the same thing. The high-watermark fetch drives daily efficiency; the rolling lookback window provides fault-tolerance for connectivity-impaired probes.
   * Employs Delta Lake's `MERGE INTO` construct on `measurement_id`:
-    1. **Late-Arriving Telemetry**: New measurements for $T-3$ uploaded today take the `WHEN NOT MATCHED INSERT` branch.
-    2. **Dimensional Re-Enrichment**: For existing records, `WHEN MATCHED UPDATE` updates enriched analytical fields (`content_category`, `tampering_vector`, `human_rights_risk_tier`) when Citizen Lab updates its taxonomy or when tampering classification heuristics are refined.
+    1. **Late-Arriving Telemetry**: Measurements for $T-3$ uploaded today take the `WHEN NOT MATCHED INSERT` branch.
+    2. **Dimensional Re-Enrichment**: `WHEN MATCHED UPDATE` updates enriched analytical fields (`content_category`, `tampering_vector`) when Citizen Lab releases updated URL category mappings.
     3. **Idempotent Recovery**: Multiple runs over the exact same date range never produce duplicate records.
 
 ---
@@ -168,6 +170,7 @@ A forensic audit of raw OONI network probes identifies high-risk metadata. Becau
 * `probe_asn`: Autonomous System Number indicating the exact local ISP and geographic routing zone.
 * `probe_city` / `probe_cc`: The localized geographic presence of the tester.
 * `input`: The tested target URL, which may contain sensitive political, religious, or investigative research paths.
+* **Quasi-Identifier Risk**: The combination of `probe_cc` (country) + `probe_asn` (ISP) + `target_url` + `measurement_start_time` (second precision) constitutes a **quasi-identifier** that can re-identify an individual activist even without a direct IP address. For example, if only one person in AS9541 tested `https://[dissident-blog].com` at 17:29:31 on a given day, their identity can be inferred from the combination. `probe_cc` and `probe_asn` are retained in Silver in plaintext for analytical necessity but are **never exposed at the individual record level** in Gold dashboards — Gold queries enforce minimum group sizes of ≥ 5 records per (`probe_cc`, `probe_asn`, `content_category`) combination to prevent individual re-identification.
 
 ### 3.2 High-Level Governance & Privacy Strategy
 Data protection policies are enforced at the **Bronze $\rightarrow$ Silver transition boundary**; no unmasked PII is permitted into Silver or Gold analytical layers.
@@ -256,20 +259,28 @@ erDiagram
   * `_batch_run_id`: Unique execution identifier for idempotency auditing.
 * **Storage Format**: Delta Lake with default Snappy compression.
 
-### 4.2 Silver Layer (Cleansed, Conformed & Enriched)
-* **Transformations & Data Quality Rules**:
-  1. **Schema Standardization**: Explicitly casting heterogeneous JSON data types into strong types (`measurement_start_time` $\rightarrow$ `TimestampType`, `probe_asn` $\rightarrow$ `StringType`).
-  2. **JSON Array Exploding**: Flattening nested network test arrays (`test_keys.queries` and `test_keys.requests`) into relational rows.
-  3. **Multi-Source Joining**:
-     * Broadcast joins with `ref_citizenlab_categories` on target URL domain.
-     * Lookup joins with `ref_asn_providers` on `probe_asn`.
-  4. **Tampering Vector Classification Engine**:
-     A PySpark conditional evaluation engine categorizes the exact technical attack:
-     * `DNS_TAMPERING`: Resolvers return `NXDOMAIN` or IPs mapping to government landing pages.
-     * `TCP_RESET_INJECTION`: TCP three-way handshake intercepted by middlebox RST flag.
-     * `TLS_HANDSHAKE_DROP`: Client Hello packet dropped or server certificate validation forged.
-     * `HTTP_BLOCK_PAGE`: Server returns HTTP 403 Forbidden with known state censorship HTML signatures.
-  5. **Deduplication**: Enforcing deduplication on `measurement_id` using Delta Lake merge operations.
+### 4.2 Silver Layer — Data Model Overview
+
+The Silver layer flattens, conforms, and enriches raw Bronze records. The target Silver schema for `silver_network_measurements` contains the following logical column groups:
+
+| Group | Key Columns | Source / Derivation |
+| :--- | :--- | :--- |
+| **Identity** | `measurement_id` (PK), `report_id`, `test_name` | `sha2(report_id \|\| input \|\| measurement_start_time)` |
+| **Timing** | `measurement_timestamp` (TimestampType), `measurement_date` (DateType) | Cast from raw string with multi-format coalesce |
+| **Probe** | `probe_cc`, `probe_asn_num` (LongType), `probe_network_name` | Stripped `AS` prefix → numeric cast |
+| **PII-Masked** | `hashed_resolver_ip` (HMAC-SHA256), `probe_ip_subnet` (/24 truncation) | Applied at Silver boundary; raw IPs dropped |
+| **Target** | `target_url`, `target_domain` (bare domain, lowercased) | `regexp_extract` from `input` field |
+| **Enrichment** | `content_category`, `content_category_description` | Broadcast join with Citizen Lab CSV on `target_domain` |
+| **Tampering** | `tampering_vector`, `blocking_value`, `is_accessible` | Derived from parsed `test_keys` per `test_name` |
+| **Anomaly Flags** | `dns_anomaly_flag`, `tcp_anomaly_flag`, `tls_anomaly_flag`, `http_anomaly_flag` | Boolean flags from test_keys failure fields |
+| **Audit** | `load_timestamp`, `_batch_id` | Pipeline execution metadata |
+
+* **Transformations Applied**:
+  1. **Schema Standardization**: `measurement_start_time` → `TimestampType` using coalesce across multiple observed OONI timestamp formats (`yyyy-MM-dd HH:mm:ss`, `yyyy-MM-dd'T'HH:mm:ss`, ISO 8601 with offset).
+  2. **test_keys Parsing**: `test_keys` is stored as a raw JSON string at Bronze (see §5.1 for rationale). In Silver, it is parsed using `from_json()` with a `test_name`-specific schema, enabling correct handling of the polymorphic `blocking` field.
+  3. **Citizen Lab Broadcast Join**: Joins on `target_domain` (bare domain extracted from OONI `input` field) against a similarly extracted bare domain from Citizen Lab's `url` column. Both sides are lowercased before joining.
+  4. **Tampering Vector Classification**: Maps the `blocking` field value to a standard label (`BENIGN`, `DNS_MANIPULATION`, `TCP_BLOCKING`, `HTTP_BLOCKING`, `CONTENT_SUBSTITUTION`).
+  5. **Deduplication**: Delta Lake `MERGE INTO` on `measurement_id` with `measurement_date` partition pruning.
 
 ### 4.3 Gold Layer (Business Marts & Dimensional Star Schema)
 The Gold layer provides high-performance, analytics-ready tables modeled in a **Star Schema** optimized for analytical queries:
@@ -403,8 +414,9 @@ Because execution is hosted on **Databricks Community Edition (1 node, 15 GB RAM
      ```
 3. **Storage Retention & Vacuum Policies**:
    * Unused Delta historical snapshots are pruned using `VACUUM silver_network_incidents RETAIN 7 DAYS` to prevent consuming disk quotas.
-4. **Cloud Compute Lifecycle (Azure for Students)**:
-   * If running on Azure Databricks, clusters use cost-effective single-node `Standard_D4ds_v5` instances with **Auto-Termination enforced at 15 minutes of inactivity**, preventing accidental credit exhaustion.
+4. **Cloud Compute Lifecycle**:
+   * **Databricks Community Edition**: Clusters automatically terminate after **120 minutes (2 hours) of inactivity**. This is a platform-enforced fixed policy — there is no configurable auto-termination setting on Community Edition. The engineering mitigation is to keep individual pipeline runs short (under 30 minutes) by scoping to single-country, single-test-type datasets.
+   * **Azure for Students**: If running on Azure Databricks with student credits, clusters use cost-effective single-node `Standard_D4ds_v5` instances. Auto-termination **can be configured** on Azure and is set to **15 minutes of inactivity** to prevent accidental credit exhaustion. This setting is available under **Cluster Configuration → Advanced Options → Auto Termination**.
 
 ---
 

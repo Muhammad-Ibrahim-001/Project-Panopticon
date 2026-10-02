@@ -46,7 +46,7 @@ All ingestion pipelines and downstream analytical queries must strictly conform 
 | `test_runtime` | `DoubleType` | Yes | $\ge 0$ | JSON `$.test_runtime` | Total wall-clock execution time of the network test in seconds. | `4.2185` |
 | `software_name` | `StringType` | Yes | - | JSON `$.software_name` | Client probe runtime engine (`ooniprobe-android`, `ooniprobe-desktop`). | `ooniprobe-android-unattended` |
 | `software_version` | `StringType` | Yes | - | JSON `$.software_version` | Semantic software version of the client probe binary. | `3.30.0` |
-| `test_keys` | `StructType` | Yes | Polymorphic | JSON `$.test_keys` | Deeply nested JSON payload capturing DNS answers, TCP handshakes, TLS certificates, and HTTP headers. | *See Section 2.1* |
+| `test_keys` | `StringType` | Yes | Polymorphic | JSON `$.test_keys` | **Stored as raw JSON string.** The `blocking` field within `test_keys` is typed `optional<string\|bool>` in the official OONI spec — a union type incompatible with a static PySpark `StructType`. Parsed per `test_name` in Silver using `from_json()`. *See Section 2.1.* | `{"blocking": false, "accessible": true, ...}` |
 | `load_timestamp` | `TimestampType` | No | System Audit | `current_timestamp()` | **[Audit]** Exact UTC timestamp when record was appended into Bronze Delta Lake. | `2026-09-29 14:15:02.184` |
 | `_source_file` | `StringType` | No | System Audit | `input_file_name()` | **[Audit]** S3 URI or local file path from which the record was read. | `s3a://ooni-data-eu-fra/raw/20260927/PK/web.jsonl.gz` |
 | `_batch_id` | `StringType` | No | System Audit | Parameter | **[Audit]** Ingestion batch identifier or execution date partition string. | `BATCH_20260927_INCREMENTAL` |
@@ -54,39 +54,85 @@ All ingestion pipelines and downstream analytical queries must strictly conform 
 
 ---
 
-### 2.1 Bronze Nested Struct: `test_keys` Structure
-The polymorphic `test_keys` column captures protocol-level forensic evidence:
+### 2.1 Bronze: `test_keys` Design Rationale
+
+`test_keys` is stored as **`StringType` (raw serialized JSON string)** at the Bronze layer. This is a deliberate engineering decision, not a shortcut:
+
+**Root Cause — Union Type:** The official OONI Web Connectivity specification (`ts-017-web-connectivity.md`) defines the `blocking` field as:
+```
+"blocking": "tcp_ip" | "dns" | "http-diff" | "http-failure" | false | null
+```
+The value `false` is a **JSON boolean** and `"dns"` is a **JSON string** — both can appear in the same column. PySpark's static `StructType` cannot represent this union type. Declaring `blocking` as `StringType` inside a nested `StructType` causes Spark's `PERMISSIVE` mode to route every record where `blocking=false` (the boolean) to `_corrupt_record`, silently discarding every benign test result.
+
+**Root Cause — Schema Polymorphism by test_name:** The `test_keys` structure is not uniform across test types:
+
+| `test_name` | Key `test_keys` Fields |
+| :--- | :--- |
+| `web_connectivity` | `blocking`, `accessible`, `queries`, `tcp_connect`, `tls_handshakes`, `requests`, `network_events` |
+| `telegram` | `telegram_http_blocking`, `telegram_tcp_blocking` — **no `blocking` field** |
+| `signal` | `signal_backend_status`, `signal_backend_failure` |
+| `tor` | `targets` as `Map<String, StructType>` — incompatible with any ArrayType schema |
+| `psiphon` | `bootstrap_time`, `failure` at root level only |
+
+A single shared `StructType` across all these shapes would fail with schema conflicts or silent data loss.
+
+**Solution:** `test_keys` is stored intact as a raw JSON string at Bronze. The Silver layer applies `from_json()` per `test_name` partition with a test-specific schema, giving strict typing where it counts.
+
+**Silver-layer parsed structure for `web_connectivity`** (after `from_json()`):
 
 ```text
-test_keys: StructType
- ├── blocking: StringType (false, dns, tcp-reset, http-diff, http-failure)
- ├── accessible: BooleanType (true = target reachable; false = blocked)
- ├── dns_experiment_failure: StringType (dns_lookup_error, nxdomain, timeout)
- ├── http_experiment_failure: StringType (connection_refused, response_never_received)
- ├── control_failure: StringType (failure talking to un-censored OONI test helper)
+test_keys_parsed: StructType  ← result of from_json(test_keys, web_connectivity_schema)
+ ├── blocking: StringType     ← JSON bool false → string "false" via StringType cast
+ ├── accessible: BooleanType
+ ├── dns_experiment_failure: StringType
+ ├── http_experiment_failure: StringType
+ ├── control_failure: StringType
+ ├── dns_consistency: StringType
+ ├── body_proportion: DoubleType
+ ├── body_length_match: BooleanType
+ ├── headers_match: BooleanType
+ ├── status_code_match: BooleanType
+ ├── title_match: BooleanType
  ├── queries: ArrayType
  │    └── StructType
- │         ├── failure: StringType (resolver error code)
+ │         ├── engine: StringType
+ │         ├── failure: StringType
+ │         ├── hostname: StringType
  │         ├── query_type: StringType (A, AAAA, HTTPS)
- │         ├── resolver_hostname: StringType (DNS server address)
+ │         ├── resolver_hostname: StringType
+ │         ├── resolver_address: StringType
+ │         ├── t0, t: DoubleType (timing)
+ │         ├── transaction_id: LongType
  │         └── answers: ArrayType
  │              └── StructType
  │                   ├── answer_type: StringType (A, CNAME)
- │                   ├── ipv4: StringType (resolved IP address)
- │                   └── ttl: LongType (DNS Time-To-Live)
+ │                   ├── ipv4: StringType
+ │                   ├── ipv6: StringType
+ │                   ├── hostname: StringType
+ │                   ├── ttl: LongType
+ │                   ├── asn: LongType       ← present in OONI spec, missing from old schema
+ │                   └── as_org_name: StringType  ← present in OONI spec, missing from old schema
  ├── tcp_connect: ArrayType
  │    └── StructType
- │         ├── ip: StringType (destination host IP)
- │         ├── port: LongType (target port: 80, 443, 853)
+ │         ├── ip: StringType
+ │         ├── port: LongType
+ │         ├── t0, t: DoubleType (timing)
+ │         ├── transaction_id: LongType
  │         └── status: StructType
  │              ├── failure: StringType (tcp_timed_out, connection_reset_by_peer)
  │              └── success: BooleanType
  └── tls_handshakes: ArrayType
       └── StructType
+           ├── network: StringType
+           ├── address: StringType
            ├── failure: StringType (ssl_invalid_hostname, certificate_revoked)
            ├── server_name: StringType (SNI host tested)
            ├── tls_version: StringType (TLSv1.2, TLSv1.3)
-           └── cipher_suite: StringType (cryptographic cipher)
+           ├── cipher_suite: StringType
+           ├── negotiated_protocol: StringType
+           ├── no_tls_verify: BooleanType
+           ├── t0, t: DoubleType (timing)
+           └── transaction_id: LongType
 ```
 
 ---
@@ -134,7 +180,7 @@ test_keys: StructType
 | :--- | :--- | :---: | :---: | :--- | :--- | :--- |
 | `measurement_id` | `StringType` | No | **Primary Key** | `sha2(concat_ws('\|\|', report_id, coalesce(input, 'NO_INPUT'), measurement_start_time), 256)` | Unique deterministic primary key. Enables idempotent `MERGE INTO`. | `a3b8c0...` (64-char hex) |
 | `report_id` | `StringType` | No | Lineage FK | Direct from Bronze `report_id` | Provenance link back to the raw OONI telemetry report. | `20260927T172931Z_webconnectivity_PK...` |
-| `event_timestamp` | `TimestampType` | No | - | `to_utc_timestamp(to_timestamp(measurement_start_time, 'yyyy-MM-dd HH:mm:ss'), 'UTC')` | Standardized UTC timestamp for time-series anomaly detection. | `2026-09-27 17:29:31.000` |
+| `event_timestamp` | `TimestampType` | No | - | Multi-format coalesce: `coalesce(to_timestamp(t, 'yyyy-MM-dd HH:mm:ss'), to_timestamp(t, "yyyy-MM-dd'T'HH:mm:ss"), to_timestamp(t, "yyyy-MM-dd'T'HH:mm:ssXXX"))` — accounts for three timestamp formats observed in live OONI archives. | Standardized UTC timestamp for time-series anomaly detection. | `2026-09-27 17:29:31.000` |
 | `measurement_date` | `DateType` | No | Partition Key | `to_date(event_timestamp)` | Physical partition key. Enables partition pruning during joins. | `2026-09-27` |
 | `target_url` | `StringType` | Yes | Sanitized | Regex token scrubber: strips session_id, token, auth query parameters | Tested URL with user tokens, authentication keys, and tracking IDs scrubbed. | `https://cloudflare-ech.com/cdn-cgi/trace` |
 | `target_domain` | `StringType` | Yes | Join Key | `lower(regexp_extract(input, '^(?:https?://)?(?:www\.)?([^/:]+)', 1))` | Cleaned second-level domain name used for Citizen Lab broadcast joins. | `cloudflare-ech.com` |
@@ -154,7 +200,7 @@ test_keys: StructType
 | `dns_experiment_failure` | `StringType` | Yes | - | Direct from `test_keys.dns_experiment_failure` | DNS failure code string. | `dns_lookup_error` |
 | `http_experiment_failure`| `StringType` | Yes | - | Direct from `test_keys.http_experiment_failure` | HTTP connection failure code. | `connection_refused` |
 | `duration_seconds` | `DoubleType` | Yes | $\ge 0$ | Direct from Bronze `test_runtime` | Execution duration in seconds. | `4.2185` |
-| `content_category` | `StringType` | No | Enrichment | Joined Citizen Lab `category_code`, default `'UNCATEGORIZED'` | Sociological content classification. | `NEWS` |
+| `content_category` | `StringType` | No | Enrichment | **Citizen Lab broadcast join on extracted bare domain** (see §4.2). Default `'UNCATEGORIZED'` when no match found. | Sociological content classification. | `NEWS` |
 | `category_description` | `StringType` | Yes | Enrichment | Joined Citizen Lab `category_description` | Full human-readable category description. | `News Outlets` |
 | `human_rights_risk_tier`| `StringType`| No | Governance | Mapped from category: `HIGH`, `MEDIUM`, `LOW` | Vulnerability assessment tier. | `HIGH` |
 | `load_timestamp` | `TimestampType` | No | System Audit | `current_timestamp()` | **[Audit]** Exact UTC timestamp when record was upserted into Silver. | `2026-09-29 14:18:22.012` |
@@ -163,31 +209,61 @@ test_keys: StructType
 ---
 
 ### 4.1 Tampering Vector Classification Logic (PySpark Specification)
-The `tampering_vector` column is derived through priority-ordered condition evaluation:
+The `tampering_vector` column is derived from `test_keys_parsed.blocking` — the result of calling `from_json(col("test_keys"), web_connectivity_schema)` on the Silver-layer parsed struct. The `blocking` field is `StringType` post-parse: `from_json()` deserialises the JSON boolean `false` as the Python string `"false"`, and JSON `null` as Python `None`.
 
 ```python
-from pyspark.sql.functions import col, when
+from pyspark.sql.functions import col, when, lit
 
-df_classified = df.withColumn(
+# test_keys_parsed is the result of:
+#   df.withColumn("test_keys_parsed", from_json(col("test_keys"), web_connectivity_schema))
+# Only applied to records where test_name == 'web_connectivity'
+
+df_classified = df_wc.withColumn(
     "tampering_vector",
+    # blocking = null OR "false" (string from JSON boolean false) → no interference
     when(
-        (col("test_keys.blocking") == "dns") | 
-        (col("test_keys.dns_experiment_failure").isNotNull() & (col("test_keys.control_failure").isNull())),
-        "DNS_TAMPERING"
-    ).when(
-        (col("test_keys.blocking") == "tcp-reset") | 
-        (col("test_keys.http_experiment_failure") == "connection_refused") |
-        (col("test_keys.http_experiment_failure") == "connection_reset_by_peer"),
-        "TCP_RESET"
-    ).when(
-        (col("test_keys.blocking") == "tls") | 
-        (col("test_keys.http_experiment_failure").like("%ssl%") | col("test_keys.http_experiment_failure").like("%tls%")),
-        "TLS_DROP"
-    ).when(
-        (col("test_keys.blocking") == "http-diff") | 
-        (col("test_keys.blocking") == "http-failure"),
-        "HTTP_BLOCK"
-    ).otherwise("BENIGN")
+        col("test_keys_parsed.blocking").isNull() |
+        (col("test_keys_parsed.blocking") == "false"),
+        lit("BENIGN")
+    )
+    # Official OONI spec blocking values (ts-017-web-connectivity.md):
+    .when(col("test_keys_parsed.blocking") == "dns",          lit("DNS_MANIPULATION"))
+    .when(col("test_keys_parsed.blocking") == "tcp_ip",       lit("TCP_BLOCKING"))
+    .when(col("test_keys_parsed.blocking") == "http-failure", lit("HTTP_BLOCKING"))
+    .when(col("test_keys_parsed.blocking") == "http-diff",    lit("CONTENT_SUBSTITUTION"))
+    .otherwise(lit("UNCLASSIFIED"))   # future-proof for new blocking categories
+)
+```
+
+### 4.2 Citizen Lab Join Logic
+
+**Critical detail**: The Citizen Lab `url` column contains **full URLs** with protocol, path, and trailing slash (e.g., `https://discomaulvi.wordpress.com/`, `http://www.Vtunnel.info/`). This was verified from the live Citizen Lab `pk.csv` file. Joining `target_domain` (bare domain extracted from OONI `input`) directly against the raw `url` column produces **zero matches**.
+
+The correct join extracts the bare domain from **both sides** using the same regex, then joins on lowercase bare domain:
+
+```python
+from pyspark.sql.functions import regexp_extract, lower, broadcast
+
+# OONI input → bare domain (already computed as target_domain in Silver)
+# target_domain = lower(regexp_extract(input, r'^(?:https?://)?(?:www\.)?([^/:?#]+)', 1))
+
+# Citizen Lab url → bare domain (MUST be extracted; raw url is a full URL)
+df_cl = df_citizenlab.withColumn(
+    "cl_domain",
+    lower(
+        regexp_extract(
+            col("url"),
+            r'^(?:https?://)?(?:www\.)?([^/:?#]+)',
+            1
+        )
+    )
+)
+
+# Join on bare domain (both lowercased to handle mixed-case domains like 'Vtunnel.info')
+df_silver = df_silver.join(
+    broadcast(df_cl),
+    df_silver.target_domain == df_cl.cl_domain,
+    "left"
 )
 ```
 
@@ -215,7 +291,7 @@ df_classified = df.withColumn(
 
 ### Table Name: `pipeline_execution_logs`
 * **Storage Format**: Delta Lake
-* **Access Mode**: Append-Only Operational Table
+* **Write Pattern**: **MERGE-based** (not append-only). Each pipeline run writes an initial `status='Running'` row via `whenNotMatchedInsertAll()`, then MERGEs final metrics (`status`, `end_time`, `duration_seconds`, row counts) via `whenMatchedUpdate()` at completion. This ensures exactly one row per run and prevents orphaned `'Running'` records if the pipeline crashes before logging completion.
 * **Granularity**: One record per pipeline execution stage.
 
 | Column Name | PySpark Data Type | Nullable | Primary Key | Description & Audit Value | Sample Value |
@@ -275,10 +351,10 @@ flowchart LR
 | :--- | :--- | :--- | :--- |
 | `$.report_id` | `report_id` | `report_id` | Direct mapping |
 | `$.input` + `report_id` + `time` | - | `measurement_id` | `sha2(report_id \|\| input \|\| time, 256)` |
-| `$.measurement_start_time` | `measurement_start_time` | `event_timestamp`, `measurement_date` | `to_utc_timestamp()`, `to_date()` |
-| `$.input` | `input` | `target_url`, `target_domain` | Token scrub regex, lowercased domain extract |
-| `$.resolver_ip` | `resolver_ip` | `hashed_resolver_ip` | Salted HMAC-SHA256 (`PEPPER_SALT`) |
-| `$.probe_ip` | `probe_ip` | `masked_probe_subnet` | `/24` subnet truncation (`192.168.1.0/24`) |
-| `$.probe_asn` | `probe_asn` | `probe_asn` | Strip `'AS'` prefix, cast to `LongType` |
-| `$.test_keys` | `test_keys` (nested struct) | `tampering_vector`, `is_anomaly` | Conditional attack evaluation engine |
-| `citizenlab.csv:category_code`| `ref_citizenlab_categories` | `content_category`, `risk_tier` | Broadcast join on `target_domain` |
+| `$.measurement_start_time` | `measurement_start_time` | `event_timestamp`, `measurement_date` | Multi-format `coalesce(to_timestamp(...))`, `to_date()` |
+| `$.input` | `input` | `target_url`, `target_domain` | Token scrub regex; `lower(regexp_extract(...))` for bare domain |
+| `$.resolver_ip` | `resolver_ip` | `hashed_resolver_ip` | Salted HMAC-SHA256 (`PEPPER_SALT`); raw field dropped |  
+| `$.probe_ip` | `probe_ip` | `masked_probe_subnet` | `/24` subnet truncation; raw field dropped |
+| `$.probe_asn` | `probe_asn` | `probe_asn_num` | Strip `'AS'` prefix, cast to `LongType` |
+| `$.test_keys` | `test_keys` (**StringType**, raw JSON) | `tampering_vector`, anomaly flags | `from_json()` per `test_name`; classifier on `blocking` field |
+| `citizenlab.csv:url` → `cl_domain` | `ref_citizenlab_categories` | `content_category`, `risk_tier` | `regexp_extract` domain from CL `url`; broadcast join on `lower(target_domain) = lower(cl_domain)` |

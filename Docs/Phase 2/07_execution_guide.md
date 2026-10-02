@@ -48,12 +48,13 @@ The pipeline strictly separates execution concerns into three operational modes 
 2. Create a single-node cluster:
    * **Runtime Version**: Databricks Runtime 14.3 LTS or 15.4 LTS (Apache Spark 3.5.0, Scala 2.12).
    * **Node Type**: Standard Free Instance (15 GB Memory, 2 Cores).
-3. Under **Advanced Options** $\rightarrow$ **Spark Config**, add the mandatory memory safeguards:
+3. Under **Advanced Options** $\rightarrow$ **Spark Config**, add the mandatory memory safeguards and S3 anonymous credential configuration:
    ```properties
    spark.sql.shuffle.partitions 16
    spark.databricks.delta.optimizeWrite.enabled true
    spark.databricks.delta.autoCompact.enabled true
    spark.sql.streaming.forceDeleteTempCheckpointLocation true
+   fs.s3a.aws.credentials.provider org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider
    ```
 4. Set up the PII Pepper Salt Secret:
    ```python
@@ -262,25 +263,41 @@ LIMIT 10;
 ### Acceptance Test Checklist:
 * [ ] `status` must be `'Success'` (zero uncaught exceptions).
 * [ ] `rows_read` equals `rows_inserted + rows_updated + rows_quarantined`.
-* [ ] In an incremental rerun of the same file: `rows_inserted` is `0`, and `rows_updated` equals `rows_read`.
+* [ ] In an incremental rerun of the same file: `rows_inserted` is `0`. **Note**: `rows_updated` will NOT equal `rows_read` in a correctly designed MERGE — it equals only the records where enriched content actually changed (`content_category`, `tampering_vector`, or anomaly flags differ). If `rows_updated == rows_read` on every rerun, the WHEN MATCHED condition is incorrectly using `_batch_id != _batch_id` as a trigger — which always fires regardless of content change, making the metric meaningless. The correct design: WHEN MATCHED fires only on content differences; `_batch_id` is always updated in `set{}` but is not a trigger condition.
 * [ ] Total execution runtime on Community Edition is under 90 seconds per batch.
 
 ---
 
 ## 8. Delta Lake Storage Maintenance Protocol
 
-Run these maintenance routines weekly or after large backfill runs to maintain high query performance in Power BI and manage storage quotas:
+Run these maintenance routines periodically to maintain query performance and manage storage quotas.
+
+> **⚠️ Community Edition OPTIMIZE Warning (Verified from Delta Lake docs):**
+> `OPTIMIZE` is a full-partition rewrite operation. Without a `WHERE` clause it rewrites **all partitions**, which on a 9.5 GB JVM heap will OOM on datasets exceeding ~3-4 million rows. Always scope OPTIMIZE to a single date or short date range using a `WHERE` clause. Do NOT run unscoped `OPTIMIZE` on Community Edition.
 
 ```sql
--- Step 1: Compact small files into optimal size & cluster by query keys
+-- CORRECT on Community Edition: scope to active date window only
+-- Source: docs.delta.io — "Use WHERE clauses to limit data processed in a single OPTIMIZE"
 OPTIMIZE silver_network_measurements
-ZORDER BY (probe_cc, probe_asn, tampering_vector);
+WHERE measurement_date >= date_sub(current_date(), 7)
+ZORDER BY (probe_cc, tampering_vector);
+
+-- DO NOT run unscoped OPTIMIZE on Community Edition:
+-- OPTIMIZE silver_network_measurements ZORDER BY (probe_cc, probe_asn, tampering_vector);  <-- DANGEROUS
 
 -- Step 2: Clean up historical transaction logs and tombstoned snapshots older than 7 days
 VACUUM silver_network_measurements RETAIN 168 HOURS;
 
--- Step 3: Optimize operational audit table
+-- Step 3: Optimize operational audit table (small table, safe unscoped)
 OPTIMIZE pipeline_execution_logs
 ZORDER BY (start_time, pipeline_layer);
 VACUUM pipeline_execution_logs RETAIN 720 HOURS;
 ```
+
+> **Alternative for DBR 15.4 LTS+**: Delta Lake recommends **Liquid Clustering** over Z-Ordering on newer runtimes. Unlike ZORDER (full rewrite), Liquid Clustering is incremental and only rewrites changed data. If your cluster runs DBR 15.4 LTS or above, replace ZORDER with:
+> ```sql
+> ALTER TABLE silver_network_measurements
+> CLUSTER BY (probe_cc, measurement_date, tampering_vector);
+> -- Then run OPTIMIZE without ZORDER — clustering is applied incrementally
+> OPTIMIZE silver_network_measurements WHERE measurement_date >= date_sub(current_date(), 7);
+> ```
