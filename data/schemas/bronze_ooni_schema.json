@@ -7,213 +7,161 @@
       "name": "report_id",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Unique OONI test report identifier" }
+      "metadata": {
+        "comment": "Unique OONI test report identifier"
+      }
     },
     {
       "name": "input",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Tested target domain or URL endpoint" }
+      "metadata": {
+        "comment": "Tested target domain or URL endpoint"
+      }
     },
     {
       "name": "test_name",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Identifier of the network probe test (e.g. web_connectivity, echcheck)" }
+      "metadata": {
+        "comment": "Identifier of the network probe test (e.g. web_connectivity, echcheck)"
+      }
     },
     {
       "name": "measurement_start_time",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Raw UTC timestamp string of test start from collector" }
+      "metadata": {
+        "comment": "Raw UTC timestamp string of test start from collector"
+      }
     },
     {
       "name": "test_start_time",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Raw UTC timestamp string of test execution initiation" }
+      "metadata": {
+        "comment": "Raw UTC timestamp string of test execution initiation"
+      }
     },
     {
       "name": "probe_asn",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Autonomous System Number of tester network (e.g. AS9541)" }
+      "metadata": {
+        "comment": "Autonomous System Number of tester network (e.g. AS9541)"
+      }
     },
     {
       "name": "probe_cc",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Two-letter ISO country code of testing probe" }
+      "metadata": {
+        "comment": "Two-letter ISO country code of testing probe"
+      }
     },
     {
       "name": "probe_ip",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Raw client probe IP address (sanitized downstream in Silver)" }
+      "metadata": {
+        "comment": "Raw client probe IP address (sanitized downstream in Silver)"
+      }
     },
     {
       "name": "probe_network_name",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Commercial name of the probe network ISP / operator" }
+      "metadata": {
+        "comment": "Commercial name of the probe network ISP / operator"
+      }
     },
     {
       "name": "resolver_asn",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Autonomous System Number of local DNS resolver" }
+      "metadata": {
+        "comment": "Autonomous System Number of local DNS resolver"
+      }
     },
     {
       "name": "resolver_ip",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "IP address of the local ISP DNS resolver (PII to be hashed in Silver)" }
+      "metadata": {
+        "comment": "IP address of the local ISP DNS resolver (PII to be hashed in Silver)"
+      }
     },
     {
       "name": "resolver_network_name",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Commercial name of resolver network" }
+      "metadata": {
+        "comment": "Commercial name of resolver network"
+      }
     },
     {
       "name": "test_runtime",
       "type": "double",
       "nullable": true,
-      "metadata": { "comment": "Total test execution duration in seconds" }
+      "metadata": {
+        "comment": "Total test execution duration in seconds"
+      }
     },
     {
       "name": "software_name",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Client test engine software name" }
+      "metadata": {
+        "comment": "Client test engine software name"
+      }
     },
     {
       "name": "software_version",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Client test engine software release version" }
+      "metadata": {
+        "comment": "Client test engine software release version"
+      }
     },
     {
       "name": "test_keys",
-      "type": {
-        "type": "struct",
-        "fields": [
-          { "name": "blocking", "type": "string", "nullable": true, "metadata": {} },
-          { "name": "accessible", "type": "boolean", "nullable": true, "metadata": {} },
-          { "name": "dns_experiment_failure", "type": "string", "nullable": true, "metadata": {} },
-          { "name": "http_experiment_failure", "type": "string", "nullable": true, "metadata": {} },
-          { "name": "control_failure", "type": "string", "nullable": true, "metadata": {} },
-          {
-            "name": "queries",
-            "type": {
-              "type": "array",
-              "elementType": {
-                "type": "struct",
-                "fields": [
-                  { "name": "failure", "type": "string", "nullable": true, "metadata": {} },
-                  { "name": "query_type", "type": "string", "nullable": true, "metadata": {} },
-                  { "name": "resolver_hostname", "type": "string", "nullable": true, "metadata": {} },
-                  { "name": "resolver_port", "type": "string", "nullable": true, "metadata": {} },
-                  {
-                    "name": "answers",
-                    "type": {
-                      "type": "array",
-                      "elementType": {
-                        "type": "struct",
-                        "fields": [
-                          { "name": "answer_type", "type": "string", "nullable": true, "metadata": {} },
-                          { "name": "ipv4", "type": "string", "nullable": true, "metadata": {} },
-                          { "name": "ipv6", "type": "string", "nullable": true, "metadata": {} },
-                          { "name": "hostname", "type": "string", "nullable": true, "metadata": {} },
-                          { "name": "ttl", "type": "long", "nullable": true, "metadata": {} }
-                        ]
-                      },
-                      "containsNull": true
-                    },
-                    "nullable": true,
-                    "metadata": {}
-                  }
-                ]
-              },
-              "containsNull": true
-            },
-            "nullable": true,
-            "metadata": {}
-          },
-          {
-            "name": "tcp_connect",
-            "type": {
-              "type": "array",
-              "elementType": {
-                "type": "struct",
-                "fields": [
-                  { "name": "ip", "type": "string", "nullable": true, "metadata": {} },
-                  { "name": "port", "type": "long", "nullable": true, "metadata": {} },
-                  {
-                    "name": "status",
-                    "type": {
-                      "type": "struct",
-                      "fields": [
-                        { "name": "failure", "type": "string", "nullable": true, "metadata": {} },
-                        { "name": "success", "type": "boolean", "nullable": true, "metadata": {} }
-                      ]
-                    },
-                    "nullable": true,
-                    "metadata": {}
-                  }
-                ]
-              },
-              "containsNull": true
-            },
-            "nullable": true,
-            "metadata": {}
-          },
-          {
-            "name": "tls_handshakes",
-            "type": {
-              "type": "array",
-              "elementType": {
-                "type": "struct",
-                "fields": [
-                  { "name": "failure", "type": "string", "nullable": true, "metadata": {} },
-                  { "name": "server_name", "type": "string", "nullable": true, "metadata": {} },
-                  { "name": "tls_version", "type": "string", "nullable": true, "metadata": {} },
-                  { "name": "cipher_suite", "type": "string", "nullable": true, "metadata": {} }
-                ]
-              },
-              "containsNull": true
-            },
-            "nullable": true,
-            "metadata": {}
-          }
-        ]
-      },
+      "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Nested payload capturing protocol-level telemetry" }
+      "metadata": {
+        "comment": "Nested payload capturing protocol-level telemetry. Stored as raw JSON string."
+      }
     },
     {
       "name": "load_timestamp",
       "type": "timestamp",
       "nullable": false,
-      "metadata": { "comment": "Audit: UTC timestamp of ingestion into Bronze Delta Lake" }
+      "metadata": {
+        "comment": "Audit: UTC timestamp of ingestion into Bronze Delta Lake"
+      }
     },
     {
       "name": "_source_file",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Audit: Input file name / S3 URI provenance" }
+      "metadata": {
+        "comment": "Audit: Input file name / S3 URI provenance"
+      }
     },
     {
       "name": "_batch_id",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Audit: Unique execution run or partition identifier" }
+      "metadata": {
+        "comment": "Audit: Unique execution run or partition identifier"
+      }
     },
     {
       "name": "_corrupt_record",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Audit: Raw unparseable text captured under PERMISSIVE mode" }
+      "metadata": {
+        "comment": "Audit: Raw unparseable text captured under PERMISSIVE mode"
+      }
     }
   ]
 }
