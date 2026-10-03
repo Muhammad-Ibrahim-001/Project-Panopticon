@@ -60,7 +60,8 @@ Project-Panopticon/
 │   │   └── 05_deployment_guide_and_troubleshooting.md # Operations Manual & OOM Mitigation
 │   └── assets/                                # Architectural & schema diagram assets
 │       ├── architecture_diagram.png           # End-to-end Medallion architecture visual
-│       └── star_schema_diagram.png            # Dimensional Star Schema ER diagram
+│       ├── star_schema_diagram.png            # Dimensional Star Schema ER diagram
+│       └── dashboard_mockup.png               # Power BI / Tableau Watchtower Command Center
 ├── data/
 │   ├── samples/                               # Lightweight local fixtures for testing & CI
 │   │   ├── sample_full_load_ooni.json         # Raw telemetry fixture (~222 KB, 15 records)

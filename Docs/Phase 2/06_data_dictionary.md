@@ -355,6 +355,6 @@ flowchart LR
 | `$.input` | `input` | `target_url`, `target_domain` | Token scrub regex; `lower(regexp_extract(...))` for bare domain |
 | `$.resolver_ip` | `resolver_ip` | `hashed_resolver_ip` | Salted HMAC-SHA256 (`PEPPER_SALT`); raw field dropped |  
 | `$.probe_ip` | `probe_ip` | `masked_probe_subnet` | `/24` subnet truncation; raw field dropped |
-| `$.probe_asn` | `probe_asn` | `probe_asn_num` | Strip `'AS'` prefix, cast to `LongType` |
+| `$.probe_asn` | `probe_asn` | `probe_asn` | Strip `'AS'` prefix, cast to `LongType` |
 | `$.test_keys` | `test_keys` (**StringType**, raw JSON) | `tampering_vector`, anomaly flags | `from_json()` per `test_name`; classifier on `blocking` field |
 | `citizenlab.csv:url` → `cl_domain` | `ref_citizenlab_categories` | `content_category`, `risk_tier` | `regexp_extract` domain from CL `url`; broadcast join on `lower(target_domain) = lower(cl_domain)` |

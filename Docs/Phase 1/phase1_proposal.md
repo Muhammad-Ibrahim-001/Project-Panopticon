@@ -25,6 +25,11 @@ In modern geopolitical conflict and authoritarian governance, digital communicat
 
 ---
 
+![Project Panopticon Lakehouse Architecture](../assets/architecture_diagram.png)
+
+<details>
+<summary>🔍 Click to inspect Mermaid source definition</summary>
+
 ```mermaid
 flowchart TB
     subgraph SOURCING ["Data Sources & Ingestion"]
@@ -34,14 +39,14 @@ flowchart TB
     end
 
     subgraph BRONZE ["Bronze Layer: Raw Ingestion"]
-        B1[("raw_ooni_measurements<br/>Delta Table (Snappy Compressed)<br/>Schema Enforcement & Audit Columns")]
+        B1[("bronze_ooni_raw<br/>Delta Table (Snappy Compressed)<br/>Schema Enforcement & Audit Columns")]
         B2[("ref_citizenlab_categories<br/>Delta Table")]
         B3[("ref_asn_providers<br/>Delta Table")]
     end
 
     subgraph SILVER ["Silver Layer: Cleansed, Conformed & Enriched"]
         S_CLEAN["PySpark Transformations:<br/>• HMAC-SHA256 IP Pseudonymization<br/>• Explode Nested Test Keys (DNS/TCP/TLS)<br/>• Tampering Vector Classification<br/>• Delta Lake MERGE INTO (3-Day Rolling Lookback & Deduplication)"]
-        S_TABLES[("silver_network_incidents<br/>Enriched with Citizen Lab & ASN Context")]
+        S_TABLES[("silver_network_measurements<br/>Enriched with Citizen Lab & ASN Context")]
     end
 
     subgraph GOLD ["Gold Layer: Analytical Star Schema & Business Marts"]
@@ -76,6 +81,7 @@ flowchart TB
     G_FACT --> DASH
     G_AGG --> DASH
 ```
+</details>
 
 ---
 
@@ -192,12 +198,17 @@ Raw Probe IP: 198.51.100.42  ──►  1. Subnet Truncation (Zero last octet): 
 4. **GDPR / "Right to be Forgotten" Compliance**:
    * If a volunteer requests deletion of their telemetry, Delta Lake's ACID transaction capability executes partition-targeted deletion vectors:
      ```sql
-     DELETE FROM silver_network_incidents WHERE anonymized_tester_id = 'target_hash';
+     DELETE FROM silver_network_measurements WHERE hashed_resolver_ip = 'target_hash';
      ```
 
 ---
 
 ## 4. High-Level Medallion Data Modeling
+
+![Panopticon Dimensional Star Schema](../assets/star_schema_diagram.png)
+
+<details>
+<summary>🔍 Click to inspect Mermaid ER Diagram definition</summary>
 
 ```mermaid
 erDiagram
@@ -250,13 +261,16 @@ erDiagram
         double response_latency_ms
     }
 ```
+</details>
 
 ### 4.1 Bronze Layer (Raw Telemetry Landing)
 * **Design Philosophy**: Direct, unaltered append-only ingestion of source JSON and CSV payloads.
+* **Table Name**: `bronze_ooni_raw`
 * **Metadata Enrichment**: Spark attaches ingestion metadata columns to every record:
-  * `_ingestion_timestamp`: UTC timestamp when the record reached the lakehouse.
-  * `_source_file_name`: Provenance tracking back to the raw S3 bucket file.
-  * `_batch_run_id`: Unique execution identifier for idempotency auditing.
+  * `load_timestamp`: Exact UTC timestamp when the record was appended into Bronze Delta Lake.
+  * `_source_file`: Provenance tracking back to the raw S3 bucket file.
+  * `_batch_id`: Unique execution identifier for idempotency auditing.
+  * `_corrupt_record`: Quarantine string capturing malformed raw JSON text under `PERMISSIVE` mode.
 * **Storage Format**: Delta Lake with default Snappy compression.
 
 ### 4.2 Silver Layer — Data Model Overview
@@ -265,15 +279,15 @@ The Silver layer flattens, conforms, and enriches raw Bronze records. The target
 
 | Group | Key Columns | Source / Derivation |
 | :--- | :--- | :--- |
-| **Identity** | `measurement_id` (PK), `report_id`, `test_name` | `sha2(report_id \|\| input \|\| measurement_start_time)` |
-| **Timing** | `measurement_timestamp` (TimestampType), `measurement_date` (DateType) | Cast from raw string with multi-format coalesce |
-| **Probe** | `probe_cc`, `probe_asn_num` (LongType), `probe_network_name` | Stripped `AS` prefix → numeric cast |
-| **PII-Masked** | `hashed_resolver_ip` (HMAC-SHA256), `probe_ip_subnet` (/24 truncation) | Applied at Silver boundary; raw IPs dropped |
+| **Identity** | `measurement_id` (PK), `report_id`, `test_name` | `sha2(report_id \|\| coalesce(input, 'NO_INPUT') \|\| measurement_start_time)` |
+| **Timing** | `event_timestamp` (TimestampType), `measurement_date` (DateType) | Cast from raw string with multi-format coalesce |
+| **Probe** | `probe_cc`, `probe_asn` (LongType), `probe_network_name` | Stripped `AS` prefix → numeric cast |
+| **PII-Masked** | `hashed_resolver_ip` (HMAC-SHA256), `masked_probe_subnet` (/24 truncation) | Applied at Silver boundary; raw IPs dropped |
 | **Target** | `target_url`, `target_domain` (bare domain, lowercased) | `regexp_extract` from `input` field |
-| **Enrichment** | `content_category`, `content_category_description` | Broadcast join with Citizen Lab CSV on `target_domain` |
-| **Tampering** | `tampering_vector`, `blocking_value`, `is_accessible` | Derived from parsed `test_keys` per `test_name` |
-| **Anomaly Flags** | `dns_anomaly_flag`, `tcp_anomaly_flag`, `tls_anomaly_flag`, `http_anomaly_flag` | Boolean flags from test_keys failure fields |
-| **Audit** | `load_timestamp`, `_batch_id` | Pipeline execution metadata |
+| **Enrichment** | `content_category`, `category_description`, `human_rights_risk_tier` | Broadcast join with Citizen Lab CSV on `target_domain` |
+| **Tampering** | `tampering_vector`, `is_anomaly` (BooleanType) | Derived from parsed `test_keys` per `test_name` |
+| **Anomaly Flags** | `dns_anomaly_flag`, `tcp_anomaly_flag`, `tls_anomaly_flag`, `http_anomaly_flag` | Binary flags from test_keys failure fields |
+| **Audit** | `load_timestamp`, `_source_file`, `_batch_id` | Pipeline execution metadata |
 
 * **Transformations Applied**:
   1. **Schema Standardization**: `measurement_start_time` → `TimestampType` using coalesce across multiple observed OONI timestamp formats (`yyyy-MM-dd HH:mm:ss`, `yyyy-MM-dd'T'HH:mm:ss`, ISO 8601 with offset).
@@ -288,12 +302,12 @@ The Gold layer provides high-performance, analytics-ready tables modeled in a **
 * **Fact Table**: `fact_network_anomaly`
   * Granularity: One row per confirmed network test failure/anomaly.
   * Foreign Keys: `date_key`, `country_code`, `asn_id`, `category_code`.
-  * Measures: `dns_anomaly_flag`, `tcp_anomaly_flag`, `tls_anomaly_flag`, `response_latency_ms`.
+  * Measures: `dns_anomaly_flag`, `tcp_anomaly_flag`, `tls_anomaly_flag`, `http_anomaly_flag`, `response_latency_ms`.
 * **Dimension Tables**:
-  * `dim_country_region`: ISO country details, geopolitical region, Press Freedom Index ranking.
-  * `dim_isp_telecom`: Autonomous System details, brand name, state-owned vs. private commercial classification.
-  * `dim_content_category`: Citizen Lab categories (`NEWS`, `VPN`, `POLITICAL_OPPOSITION`).
-  * `dim_date_time`: Date, hour, day of week, crisis period flag.
+  * `dim_country_region`: ISO country details, geopolitical region, Press Freedom Index ranking (`press_freedom_index_tier`).
+  * `dim_isp_telecom`: Autonomous System details, brand name, state-owned vs. private commercial classification (`ownership_type`).
+  * `dim_content_category`: Citizen Lab categories (`NEWS`, `VPN`, `POLITICAL_OPPOSITION`), sensitivity level, and risk tier (`legal_risk_tier`).
+  * `dim_date_time`: Date, hour, day of week (`day_of_week`), crisis period flag, and weekend indicator (`is_weekend`).
 * **Aggregated Gold Mart**: `agg_daily_censorship_severity`
   * Precomputed rollups calculating the **Censorship Aggression Index (CAI)**:
     $$\text{CAI} = \left( \frac{\text{Total Tampered Tests}}{\text{Total Tests Conducted}} \right) \times 100$$
@@ -312,6 +326,11 @@ The Gold layer provides high-performance, analytics-ready tables modeled in a **
    * Identifies compliance divergence across competing commercial ISPs within the same jurisdiction.
 
 ### 5.2 Dashboard Specifications (Power BI / Tableau)
+
+![Panopticon Executive Dashboard Mockup](../assets/dashboard_mockup.png)
+
+<details>
+<summary>🔍 Click to inspect ASCII Wireframe Layout</summary>
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -338,6 +357,7 @@ The Gold layer provides high-performance, analytics-ready tables modeled in a **
 │  └────────────────────────────────────────────────────────┘ └──────────────────────────────────────────┘
 └────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+</details>
 
 #### Detailed Visual Matrix
 * **Visual 1: Global Censorship Severity Map (Geospatial Choropleth)**
@@ -382,7 +402,8 @@ Project-Panopticon/
 │   │   └── 05_deployment_guide_and_troubleshooting.md # Operations Manual & OOM Mitigation
 │   └── assets/                                # Visual architecture & schema artifacts
 │       ├── architecture_diagram.png           # High-resolution Lakehouse Architecture
-│       └── star_schema_diagram.png            # Dimensional Star Schema Entity Diagram
+│       ├── star_schema_diagram.png            # Dimensional Star Schema Entity Diagram
+│       └── dashboard_mockup.png               # Power BI / Tableau Watchtower Command Center
 ├── data/
 │   ├── samples/                             # Version-controlled sample payloads
 │   │   ├── sample_full_load_ooni.json       # Baseline probe telemetry fixture
@@ -409,11 +430,11 @@ Because execution is hosted on **Databricks Community Edition (1 node, 15 GB RAM
    * Small files generated by daily streaming batches create filesystem metadata bottlenecks.
    * *Configuration*: Regularly execute automated compaction and multidimensional clustering on high-frequency query predicates:
      ```sql
-     OPTIMIZE silver_network_incidents 
+     OPTIMIZE silver_network_measurements 
      ZORDER BY (country_code, measurement_date, asn_id);
      ```
 3. **Storage Retention & Vacuum Policies**:
-   * Unused Delta historical snapshots are pruned using `VACUUM silver_network_incidents RETAIN 7 DAYS` to prevent consuming disk quotas.
+   * Unused Delta historical snapshots are pruned using `VACUUM silver_network_measurements RETAIN 7 DAYS` to prevent consuming disk quotas.
 4. **Cloud Compute Lifecycle**:
    * **Databricks Community Edition**: Clusters automatically terminate after **120 minutes (2 hours) of inactivity**. This is a platform-enforced fixed policy — there is no configurable auto-termination setting on Community Edition. The engineering mitigation is to keep individual pipeline runs short (under 30 minutes) by scoping to single-country, single-test-type datasets.
    * **Azure for Students**: If running on Azure Databricks with student credits, clusters use cost-effective single-node `Standard_D4ds_v5` instances. Auto-termination **can be configured** on Azure and is set to **15 minutes of inactivity** to prevent accidental credit exhaustion. This setting is available under **Cluster Configuration → Advanced Options → Auto Termination**.

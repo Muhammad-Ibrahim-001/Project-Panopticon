@@ -12,13 +12,32 @@ This document outlines the **8 core engineering features** you will build, accom
 
 ## 1. Semi-Structured JSON Parsing & Polymorphic Schema Enforcement
 * **The Problem**: Raw OONI network logs are deeply nested JSONL files. Different tests (`web_connectivity`, `whatsapp`, `dnscheck`) have different structures inside `test_keys`. Naive schema inference (`inferSchema=True`) will trigger a full file scan, exhaust cluster memory, or produce corrupted columns.
-* **The Core DE Feature**: Explicit `StructType` schema definition and safe parsing.
+* **The Core DE Feature**: Two-tier schema enforcement: storing polymorphic `test_keys` as raw `StringType` at Bronze, and applying test-specific `StructType` schemas via `from_json()` at Silver.
 * **PySpark Code Pattern**:
 ```python
 from pyspark.sql.types import StructType, StructField, StringType, BooleanType, ArrayType, DoubleType, LongType
+from pyspark.sql.functions import col, from_json
 
-test_keys_schema = StructType([
-    StructField("blocking", StringType(), True),
+# 1. Bronze: Strict Schema-on-Read stores polymorphic test_keys as raw StringType
+base_schema = StructType([
+    StructField("report_id", StringType(), False),
+    StructField("input", StringType(), True),
+    StructField("test_name", StringType(), False),
+    StructField("measurement_start_time", StringType(), False),
+    StructField("probe_asn", StringType(), False),
+    StructField("probe_cc", StringType(), False),
+    StructField("resolver_ip", StringType(), True),
+    StructField("test_runtime", DoubleType(), True),
+    StructField("test_keys", StringType(), True),  # Raw JSON string prevents union-type crashes
+    StructField("_corrupt_record", StringType(), True)
+])
+
+# Read Bronze without inferSchema overhead
+df_bronze = spark.read.schema(base_schema).option("mode", "PERMISSIVE").json("s3a://ooni-data-eu-fra/raw/20260920/*/*/*/*.jsonl.gz")
+
+# 2. Silver: Test-specific schema applied via from_json() per test_name
+web_test_keys_schema = StructType([
+    StructField("blocking", StringType(), True),  # Normalized string handling boolean/string union
     StructField("dns_experiment_failure", StringType(), True),
     StructField("http_experiment_failure", StringType(), True),
     StructField("control_failure", StringType(), True),
@@ -36,8 +55,9 @@ test_keys_schema = StructType([
     ), True)
 ])
 
-# Read without inferSchema overhead
-df_bronze = spark.read.schema(base_schema).json("s3a://ooni-data-eu-fra/raw/20260920/*/*/*/*.jsonl.gz")
+df_parsed = df_bronze.filter(col("test_name") == "web_connectivity").withColumn(
+    "parsed_keys", from_json(col("test_keys"), web_test_keys_schema)
+)
 ```
 
 ---
@@ -109,15 +129,15 @@ PEPPER_SALT = dbutils.secrets.get(scope="panopticon_vault", key="ip_salt")
 
 df_silver = df_bronze.withColumn(
     # One-way salted cryptographic hash of resolver IP
-    "anonymized_resolver_id", sha2(concat(col("resolver_ip"), lit(PEPPER_SALT)), 256)
+    "hashed_resolver_ip", sha2(concat(col("resolver_ip"), lit(PEPPER_SALT)), 256)
 ).withColumn(
     # Truncate IPv4 to /24 subnet for regional analytics without user tracking
-    "resolver_subnet", concat(split(col("resolver_ip"), "\.")[0], lit("."),
-                              split(col("resolver_ip"), "\.")[1], lit("."),
-                              split(col("resolver_ip"), "\.")[2], lit(".0/24"))
+    "masked_probe_subnet", concat(split(col("probe_ip"), "\.")[0], lit("."),
+                                  split(col("probe_ip"), "\.")[1], lit("."),
+                                  split(col("probe_ip"), "\.")[2], lit(".0/24"))
 ).withColumn(
     # Strip sensitive authentication tokens from tested URLs
-    "sanitized_url", regexp_replace(col("input"), "([?&](session_id|token|auth)=)[^&]+", "$1REDACTED")
+    "target_url", regexp_replace(col("input"), "([?&](session_id|token|auth)=)[^&]+", "$1REDACTED")
 ).drop("resolver_ip", "probe_ip")
 ```
 
@@ -167,11 +187,11 @@ df_anomaly = (
 * **Delta SQL Commands**:
 ```sql
 -- Compact small files into optimal 128MB-1GB sizes and cluster by query keys
-OPTIMIZE silver_network_incidents
-ZORDER BY (country_code, measurement_date, probe_asn);
+OPTIMIZE silver_network_measurements
+ZORDER BY (probe_cc, measurement_date, probe_asn);
 
 -- Clean up tombstoned files older than 7 days to manage storage limits
-VACUUM silver_network_incidents RETAIN 168 HOURS;
+VACUUM silver_network_measurements RETAIN 168 HOURS;
 ```
 
 ---

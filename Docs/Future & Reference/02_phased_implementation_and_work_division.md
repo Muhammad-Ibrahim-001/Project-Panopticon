@@ -44,7 +44,7 @@ To ensure balanced accountability and maximum learning across distributed system
 * **Sprint 2.1: Bronze Ingestion Pipeline**:
   * Implement `01_bronze_ingestion_streaming.py` in PySpark.
   * Ingest the scoped ~500 MB baseline using explicit `StructType` Schema-on-Read in bounded micro-batches (`maxBytesPerTrigger = 512MB`).
-  * Attach ingestion audit columns (`_ingestion_timestamp`, `_source_file`, `_batch_id`).
+  * Attach ingestion audit columns (`load_timestamp`, `_source_file`, `_batch_id`).
   * Save to `bronze_ooni_raw` Delta table partitioned by date.
 * **Sprint 2.2: Cleansing & PII Cryptographic Sanitization**:
   * Implement `02_silver_cleaning_anonymization.py`.
