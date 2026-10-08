@@ -25,7 +25,7 @@ import sys
 import uuid
 import traceback
 import importlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from pyspark.sql import SparkSession, Row
@@ -45,7 +45,16 @@ for _mod_name in ("notebooks.00_config", "00_config"):
     except (ImportError, ModuleNotFoundError):
         continue
 
-# 13-column operational audit schema
+
+class AuditStatus:
+    """Centralized execution state constants to prevent inconsistent status strings."""
+    RUNNING = "Running"
+    SUCCESS = "Success"
+    FAILURE = "Failure"
+    PARTIAL_QUARANTINE = "Partial_Quarantine"
+
+
+# 13-column operational audit schema strictly aligned with course requirements
 AUDIT_LOG_SCHEMA = StructType([
     StructField("log_id",           StringType(),    False),
     StructField("pipeline_layer",   StringType(),    False),
@@ -64,7 +73,10 @@ AUDIT_LOG_SCHEMA = StructType([
 
 
 def init_audit_log_table(spark: Optional[SparkSession] = None, log_path: Optional[str] = None) -> str:
-    """Initializes the Delta audit log table if it does not already exist."""
+    """
+    Initializes the Delta audit table safely against concurrent pipeline runs.
+    Uses mode('ignore') to prevent race conditions during cluster initialization.
+    """
     resolved_spark = _resolve_spark_session(spark)
     target_path = log_path or (
         config.PATHS["audit_logs"] if config and hasattr(config, "PATHS")
@@ -74,52 +86,50 @@ def init_audit_log_table(spark: Optional[SparkSession] = None, log_path: Optiona
     try:
         if not DeltaTable.isDeltaTable(resolved_spark, target_path):
             empty_df = resolved_spark.createDataFrame([], AUDIT_LOG_SCHEMA)
-            empty_df.write.format("delta").mode("overwrite").save(target_path)
+            empty_df.write.format("delta").mode("ignore").save(target_path)
             print(f"[AuditLogger] Initialized Delta audit table at: {target_path}")
     except Exception as err:
-        print(f"[AuditLogger Warning] Table check failed at {target_path}: {err}")
+        print(f"[AuditLogger Warning] Non-blocking init check at {target_path}: {err}")
 
     return target_path
 
 
 class PipelineAuditor:
-    """Context manager for tracking pipeline stage runs, row counts, and exceptions."""
+    """
+    Context manager for automated execution auditing and error capture.
+    Provides non-blocking execution: logger failures emit warnings and never crash ETL.
+    """
 
     def __init__(
         self,
-        spark_or_layer: Any = None,
-        layer: Optional[str] = None,
-        parameter: Optional[str] = None,
+        layer: str,
+        parameter: str,
         load_type: str = "incremental",
         spark: Optional[SparkSession] = None,
         log_path: Optional[str] = None,
         **extra_metadata: Any
     ):
-        # Resolve positional and keyword arguments dynamically
-        if isinstance(spark_or_layer, SparkSession):
-            self.spark = spark_or_layer
-            self.layer = str(layer or "UNSPECIFIED_LAYER")
-            self.parameter = str(parameter or "DEFAULT")
-        elif isinstance(spark_or_layer, str):
-            self.spark = _resolve_spark_session(spark)
-            self.layer = spark_or_layer
-            self.parameter = str(layer or parameter or "DEFAULT")
+        # Backward-compatible check in case spark was passed as first argument
+        if isinstance(layer, SparkSession):
+            self.spark = layer
+            self.layer = str(parameter or "UNSPECIFIED_LAYER")
+            self.parameter = str(load_type or "DEFAULT")
+            self.load_type = "Incremental"
         else:
             self.spark = _resolve_spark_session(spark)
             self.layer = str(layer or "UNSPECIFIED_LAYER")
             self.parameter = str(parameter or "DEFAULT")
+            self.load_type = str(load_type).capitalize() if load_type else "Incremental"
 
-        self.load_type = str(load_type).capitalize() if load_type else "Incremental"
-
-        # Execution state
+        # Timezone-aware UTC timestamp
         self.log_id = str(uuid.uuid4())
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(timezone.utc)
         self.end_time: Optional[datetime] = None
         self.duration_seconds: Optional[float] = None
-        self.status: str = "Running"
+        self.status: str = AuditStatus.RUNNING
         self.error_message: Optional[str] = None
 
-        # Row counters
+        # Row counts
         self.rows_read: int = 0
         self.rows_inserted: int = 0
         self.rows_updated: int = 0
@@ -134,15 +144,36 @@ class PipelineAuditor:
         rows_updated: int = 0,
         rows_quarantined: int = 0
     ) -> "PipelineAuditor":
-        """Updates row counts during execution."""
+        """Manually sets row counts during pipeline execution."""
         self.rows_read = int(rows_read or 0)
         self.rows_inserted = int(rows_inserted or 0)
         self.rows_updated = int(rows_updated or 0)
         self.rows_quarantined = int(rows_quarantined or 0)
         return self
 
+    def capture_df_metrics(
+        self,
+        read_df: Optional[Any] = None,
+        inserted_df: Optional[Any] = None,
+        updated_df: Optional[Any] = None,
+        quarantined_df: Optional[Any] = None
+    ) -> "PipelineAuditor":
+        """Convenience helper to reliably extract row counts directly from Spark DataFrames."""
+        try:
+            if read_df is not None:
+                self.rows_read = read_df.count()
+            if inserted_df is not None:
+                self.rows_inserted = inserted_df.count()
+            if updated_df is not None:
+                self.rows_updated = updated_df.count()
+            if quarantined_df is not None:
+                self.rows_quarantined = quarantined_df.count()
+        except Exception as err:
+            print(f"[AuditLogger Warning] Could not derive counts from DataFrames: {err}")
+        return self
+
     def _commit_to_delta(self) -> None:
-        """Upserts current execution state into Delta table via MERGE INTO."""
+        """Upserts audit state into Delta table via MERGE INTO. Non-blocking on failure."""
         try:
             log_record = Row(
                 log_id=self.log_id,
@@ -172,28 +203,28 @@ class PipelineAuditor:
                 .whenNotMatchedInsertAll()
                 .execute())
         except Exception as log_err:
-            print(f"[AuditLogger Warning] Could not persist log ({self.status}): {log_err}")
+            print(f"[AuditLogger Warning] Non-blocking write skipped ({self.status}): {log_err}")
 
     def __enter__(self) -> "PipelineAuditor":
-        """Logs initial state on entering the block."""
+        """Logs initial record with status='Running' to track in-flight runs."""
         self._commit_to_delta()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
-        """Calculates runtime, captures status or failure trace, and commits final log."""
-        self.end_time = datetime.utcnow()
+        """Calculates runtime, logs final status or error traceback, and commits record."""
+        self.end_time = datetime.now(timezone.utc)
         self.duration_seconds = round((self.end_time - self.start_time).total_seconds(), 2)
 
         if exc_type is not None:
-            self.status = "Failure"
+            self.status = AuditStatus.FAILURE
             self.error_message = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
         elif self.rows_quarantined > 0:
-            self.status = "Partial_Quarantine"
+            self.status = AuditStatus.PARTIAL_QUARANTINE
         else:
-            self.status = "Success"
+            self.status = AuditStatus.SUCCESS
 
         self._commit_to_delta()
-        return False  # Re-raises exceptions to notify caller
+        return False  # Propagates original exception to caller
 
 
 def query_recent_logs(
@@ -217,7 +248,7 @@ def query_recent_logs(
 
 
 def _resolve_spark_session(spark: Optional[SparkSession] = None) -> SparkSession:
-    """Finds active SparkSession from args, active session, or global notebook scope."""
+    """Resolves active SparkSession from args, active session, or Databricks notebook scope."""
     if spark is not None and isinstance(spark, SparkSession):
         return spark
 
