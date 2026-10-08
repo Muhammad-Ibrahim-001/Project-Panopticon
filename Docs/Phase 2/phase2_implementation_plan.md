@@ -386,6 +386,7 @@ lookback_days = int(dbutils.widgets.get("lookback_days"))
 ```text
 Panopticon/
 ├── notebooks/
+│   ├── 00_config.py                # Central configuration, DBFS/local paths & API endpoints
 │   ├── 00_audit_logger.py          # Operational logging utility & table setup
 │   ├── 01_bronze_ingestion.py       # Strict schema-on-read ingestion + quarantine + metadata
 │   ├── 02_silver_transformation.py  # Cleansing, casting, PII masking, flattening & Delta MERGE

@@ -34,6 +34,7 @@ Empirically benchmarked on live OONI archives: raw `.jsonl.gz` files expand by *
 * **Full Load Baseline**: **~400 MB to 600 MB compressed `.json.gz`** (~2.2 GB – 3.2 GB raw JSON, ~35,000 to 60,000 deep network events for focus countries: Pakistan `PK`, Iran `IR`, Russia `RU`).
 * **Daily Incremental Load**: **~25 MB to 50 MB compressed / day** (~140 MB – 270 MB raw text, ~2,000 to 5,000 events / day).
 * **Late-Arriving Reconciliation**: Incremental loads scan a **3-day rolling lookback window ($T-3$ to $T$)** using Delta Lake `MERGE INTO`, reconciling late submissions from offline mobile probes and updating enriched taxonomy with zero duplicate rows.
+* **Instructor Runtime Mandate (Zero Manual Uploads)**: Under course specifications, no data is manually uploaded via the Databricks UI or local upload widgets. All raw telemetry and target taxonomy are fetched programmatically within Databricks notebooks using public REST endpoints (OONI Measurement API and Citizen Lab GitHub raw API).
 
 ---
 
@@ -43,6 +44,7 @@ Empirically benchmarked on live OONI archives: raw `.jsonl.gz` files expand by *
 Project-Panopticon/
 ├── README.md                                  # Executive lakehouse guide & project overview
 ├── .gitignore                                 # Production environment & secret ignore rules
+├── AGENTS.md                                  # Operational guidelines & developer practices
 ├── Docs/                                      # Structured documentation suite
 │   ├── .docx/                                 # Word documents for academic submission
 │   │   └── phase1_proposal.docx               # Executive Word Document Version
@@ -71,6 +73,7 @@ Project-Panopticon/
 │       ├── bronze_ooni_schema.json            # Bronze strict Schema-on-Read contract
 │       └── silver_conformed_schema.json       # Silver cleansed & enriched schema contract
 └── notebooks/                                 # Implementation PySpark pipelines
+    ├── 00_config.py                           # Central configuration, DBFS/local paths & API endpoints
     ├── 00_audit_logger.py                     # Context manager & operational Delta logger
     ├── 01_bronze_ingestion.py                 # Schema-on-read ingestion + quarantine + metadata
     ├── 02_silver_transformation.py            # PII masking, array flattening & Delta MERGE
