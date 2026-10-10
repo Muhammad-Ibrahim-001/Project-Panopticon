@@ -266,11 +266,28 @@ df_raw = (
 )
 
 # SPLIT BEFORE WRITING — corrupt records must not enter Bronze
-df_valid     = df_raw.filter(col("_corrupt_record").isNull()).drop("_corrupt_record")
-df_quarantine = df_raw.filter(col("_corrupt_record").isNotNull())
+# Note: On Databricks Serverless (Photon Engine), querying only _corrupt_record from unmaterialized
+# JSON streams is disallowed ([UNSUPPORTED_FEATURE.QUERY_ONLY_CORRUPT_RECORD_COLUMN]), and .cache() is disabled.
+# Production Solution: Materialize df_raw to a temporary Delta staging path before filtering.
+temp_staging_path = f"{bronze_path}_temp_staging"
+df_raw.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(temp_staging_path)
+df_materialized = spark.read.format("delta").load(temp_staging_path)
 
-df_valid.write.format("delta").mode("append").partitionBy("measurement_date").save(bronze_path)
-df_quarantine.write.format("delta").mode("append").save(quarantine_path)
+df_valid     = df_materialized.filter(col("_corrupt_record").isNull()).drop("_corrupt_record")
+df_quarantine = df_materialized.filter(col("_corrupt_record").isNotNull())
+
+# Idempotent write via replaceWhere: replaces the target date partition without duplicate rows
+if df_quarantine.count() > 0:
+    df_quarantine.write.format("delta").mode("append").save(quarantine_path)
+
+df_valid_staged = df_valid.withColumns({
+    "load_timestamp": current_timestamp(),
+    "_source_file": lit(source_provenance),
+    "_batch_id": lit(batch_id),
+    "measurement_date": measurement_date_expr
+})
+
+df_valid_staged.write.format("delta").mode("overwrite").option("replaceWhere", f"measurement_date = '{batch_date}'").save(bronze_path)
 ```
 
 **Silver: Parse test_keys per test_name**

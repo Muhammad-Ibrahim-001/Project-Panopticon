@@ -26,6 +26,7 @@ All ingestion pipelines and downstream analytical queries must strictly conform 
 ### Table Name: `bronze_ooni_raw`
 * **Storage Format**: Delta Lake (Snappy Compressed)
 * **Physical Partitioning**: `PARTITIONED BY (measurement_date)`
+* **Physical Storage Path**: `/Volumes/workspace/default/panopticon/bronze/bronze_ooni_raw` (Databricks Serverless / Unity Catalog) or `/FileStore/tables/panopticon/...` (Classic DBFS)
 * **Granularity**: One record per raw OONI network measurement probe.
 * **Schema Contract**: [`data/schemas/bronze_ooni_schema.json`](../../data/schemas/bronze_ooni_schema.json)
 
@@ -48,7 +49,7 @@ All ingestion pipelines and downstream analytical queries must strictly conform 
 | `software_version` | `StringType` | Yes | - | JSON `$.software_version` | Semantic software version of the client probe binary. | `3.30.0` |
 | `test_keys` | `StringType` | Yes | Polymorphic | JSON `$.test_keys` | **Stored as raw JSON string.** The `blocking` field within `test_keys` is typed `optional<string\|bool>` in the official OONI spec — a union type incompatible with a static PySpark `StructType`. Parsed per `test_name` in Silver using `from_json()`. *See Section 2.1.* | `{"blocking": false, "accessible": true, ...}` |
 | `load_timestamp` | `TimestampType` | No | System Audit | `current_timestamp()` | **[Audit]** Exact UTC timestamp when record was appended into Bronze Delta Lake. | `2026-09-29 14:15:02.184` |
-| `_source_file` | `StringType` | No | System Audit | `input_file_name()` | **[Audit]** S3 URI or local file path from which the record was read. | `s3a://ooni-data-eu-fra/raw/20260927/PK/web.jsonl.gz` |
+| `_source_file` | `StringType` | No | System Audit | `lit(source_provenance)` | **[Audit]** S3 URI or programmatic API origin label (`input_file_name()` replaced for Unity Catalog Serverless compliance). | `OONI_API_IR_2026-09-27` |
 | `_batch_id` | `StringType` | No | System Audit | Parameter | **[Audit]** Ingestion batch identifier or execution date partition string. | `BATCH_20260927_INCREMENTAL` |
 | `_corrupt_record` | `StringType` | Yes | Quarantine | Spark PERMISSIVE | **[Audit]** Contains malformed, unparseable raw JSON text when schema validation fails. | `{"bad_json": ...` |
 
@@ -142,6 +143,7 @@ test_keys_parsed: StructType  ← result of from_json(test_keys, web_connectivit
 ### 3.1 Table Name: `ref_citizenlab_categories`
 * **Source**: [Citizen Lab Test Lists](https://github.com/citizenlab/test-lists) (Munk School of Global Affairs)
 * **Physical Format**: Delta Lake (Broadcastable Table $\sim 68$ KB)
+* **Physical Storage Path**: `/Volumes/workspace/default/panopticon/reference/citizenlab_categories` (Databricks Serverless / Unity Catalog) or `/FileStore/tables/panopticon/reference/...` (Classic DBFS)
 * **Granularity**: One row per monitored URL.
 
 | Column Name | PySpark Data Type | Nullable | Constraint | Description | Sample Value |
@@ -172,6 +174,7 @@ test_keys_parsed: StructType  ← result of from_json(test_keys, web_connectivit
 ### Table Name: `silver_network_measurements`
 * **Storage Format**: Delta Lake (Snappy Compressed)
 * **Physical Partitioning**: `PARTITIONED BY (measurement_date)`
+* **Physical Storage Path**: `/Volumes/workspace/default/panopticon/silver/silver_network_measurements` (Databricks Serverless / Unity Catalog) or `/FileStore/tables/panopticon/silver/...` (Classic DBFS)
 * **Multidimensional Clustering**: `ZORDER BY (probe_cc, probe_asn, tampering_vector)`
 * **Granularity**: One row per normalized network measurement probe event.
 * **Schema Contract**: [`data/schemas/silver_conformed_schema.json`](../../data/schemas/silver_conformed_schema.json)
@@ -273,6 +276,7 @@ df_silver = df_silver.join(
 
 ### Table Name: `quarantine_ooni_raw`
 * **Storage Format**: Delta Lake (Snappy Compressed)
+* **Physical Storage Path**: `/Volumes/workspace/default/panopticon/bronze/quarantine_ooni_raw` (Databricks Serverless / Unity Catalog) or `/FileStore/tables/panopticon/quarantine/...` (Classic DBFS)
 * **Retention Policy**: 30 Days (auto-vacuumed)
 * **Purpose**: Isolates malformed JSON, corrupted timestamps, or schema drift violations without failing the ingestion pipeline.
 
@@ -291,6 +295,7 @@ df_silver = df_silver.join(
 
 ### Table Name: `pipeline_execution_logs`
 * **Storage Format**: Delta Lake
+* **Physical Storage Path**: `/Volumes/workspace/default/panopticon/logs/pipeline_execution_logs` (Databricks Serverless / Unity Catalog) or `/FileStore/tables/panopticon/logs/...` (Classic DBFS)
 * **Write Pattern**: **MERGE-based** (not append-only). Each pipeline run writes an initial `status='Running'` row via `whenNotMatchedInsertAll()`, then MERGEs final metrics (`status`, `end_time`, `duration_seconds`, row counts) via `whenMatchedUpdate()` at completion. This ensures exactly one row per run and prevents orphaned `'Running'` records if the pipeline crashes before logging completion.
 * **Granularity**: One record per pipeline execution stage.
 

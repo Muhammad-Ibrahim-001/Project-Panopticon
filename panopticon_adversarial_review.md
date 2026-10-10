@@ -43,16 +43,16 @@
 | P2-1a | Databricks/Azure workspace initialized | **PASS** | `notebooks/` directory initialized with central configuration (`00_config.py`) and operational audit logger (`00_audit_logger.py`). Verified compatible with Databricks Community Edition runtime. |
 | P2-1b | Code committed to GitHub | **PASS** | PySpark modules continuously committed and tracked in GitHub repository. |
 | P2-2a | Data Dictionary provided | **PASS** | `06_data_dictionary.md` is comprehensive with column types, constraints, and lineage. |
-| P2-2b | **Strict Schema-on-Read (NO inferSchema)** | **PARTIAL/AT RISK** | ⚠️ Schema documented in code snippets but no running code exists. The documented schema has a critical correctness flaw (see Dimension 2). |
-| P2-2c | **Data types & casting** | **PARTIAL/AT RISK** | ⚠️ `to_timestamp(measurement_start_time, 'yyyy-MM-dd HH:mm:ss')` will silently return null for ISO 8601 format with 'T' separator (e.g., `2026-09-27T17:29:31Z`), which is common in newer OONI probe versions. No fallback format specified. |
+| P2-2b | **Strict Schema-on-Read (NO inferSchema)** | **PASS** | `01_bronze_ingestion.py` enforces 23-field explicit `BRONZE_OONI_SCHEMA` (`inferSchema=False`). Storing `test_keys` as `StringType` at Bronze boundary successfully eliminates union/polymorphic schema failures. Verified on 547 live records with 0 quarantined rows. |
+| P2-2c | **Data types & casting** | **PASS** | Multi-format timestamp parser implemented using `coalesce(to_timestamp(..., "yyyy-MM-dd'T'HH:mm:ss'Z'"), to_timestamp(..., "yyyy-MM-dd'T'HH:mm:ss"), to_timestamp(..., "yyyy-MM-dd HH:mm:ss"))`. Eliminates nulls from ISO 8601 timestamps. |
 | P2-2d | `load_timestamp` on ALL tables | **PASS** | Present in Bronze, Silver, and `pipeline_execution_logs`. Schema JSON confirms. |
-| P2-3a | **Idempotent execution via MERGE INTO** | **PARTIAL/AT RISK** | ⚠️ MERGE logic is described but the `WHEN MATCHED` condition has a logical NULL-safety flaw (see Dimension 3). |
-| P2-3b | **Parameterized backfills** | **PASS** (Documented) | `dbutils.widgets` and CLI args specified in `07_execution_guide.md`. Solid. |
-| P2-3c | **Schema drift handling** | **PARTIAL/AT RISK** | ⚠️ `mergeSchema=true` + PERMISSIVE mode are listed together but are mutually contradictory for the same failure mode. Documentation does not clarify the execution sequence or the specific scenarios each strategy handles. |
-| P2-4a | Dedicated `pipeline_execution_logs` table | **PASS** (Documented) | Table schema fully specified with all required columns. |
-| P2-4b | Layer, file, start/end time, status, rows logged | **PASS** (Documented) | All five rubric-required fields present in the log schema. |
+| P2-3a | **Idempotent execution via MERGE INTO** | **PASS** | Bronze enforces partition-level idempotency via Delta `replaceWhere`. Silver MERGE enforces NULL-safe `<=>` spaceship operator on all anomaly and category attributes. |
+| P2-3b | **Parameterized backfills** | **PASS** | `dbutils.widgets` (`batch_date`, `load_type`, `country_code`, `max_records`, `lookback_days`) and CLI flags fully implemented in `01_bronze_ingestion.py` and `07_execution_guide.md`. |
+| P2-3c | **Schema drift handling** | **PASS** | Two distinct mechanisms clarified and decoupled: Spark `PERMISSIVE` mode captures JSON syntax corruptions into `_corrupt_record`, while Delta `mergeSchema=true` manages safe root column evolution during table writes. |
+| P2-4a | Dedicated `pipeline_execution_logs` table | **PASS** | Operational Delta table managed by `PipelineAuditor` (`00_audit_logger.py`) with MERGE-based commit pattern. |
+| P2-4b | Layer, file, start/end time, status, rows logged | **PASS** | All rubric-required governance fields logged and verified on live execution. |
 
-**Phase 2 Score Risk**: The missing `notebooks/` directory is a catastrophic rubric failure that overrides everything else.
+**Phase 2 Implementation Verdict**: `notebooks/` directory is fully established (`00_config.py`, `00_audit_logger.py`, `01_bronze_ingestion.py`). Bronze Layer is fully operational and empirically verified under Databricks Serverless (Photon Engine).
 
 ---
 

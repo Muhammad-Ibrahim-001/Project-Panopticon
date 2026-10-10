@@ -88,6 +88,33 @@ Import the notebooks from the repository into your Databricks workspace:
   * Implement a **3-day rolling lookback window ($T-3$ to $T$)** in the pipeline runner (`--lookback-days 3`).
   * In the Delta `MERGE INTO` statement, specify conditional `whenMatchedUpdate` to update enriched attributes (`content_category`, `tampering_vector`, `human_rights_risk_tier`) when Citizen Lab taxonomies evolve, while using `whenNotMatchedInsertAll()` to ingest late-arriving records.
 
+### Failure Mode 6: Databricks Serverless / Spark Connect `[JVM_ATTRIBUTE_NOT_SUPPORTED]` & Managed Configs
+* **Symptoms**: Runtime crashes during initialization with `[JVM_ATTRIBUTE_NOT_SUPPORTED] Attribute 'sparkContext' is not supported on Spark Connect` or `AnalysisException: Cannot modify the value of a spark config: spark.databricks.delta.optimizeWrite.enabled`.
+* **Root Cause**: Databricks Serverless Compute utilizes the remote Spark Connect client protocol, strictly prohibiting direct JVM handles (`sc._jsc.hadoopConfiguration()`). Furthermore, Serverless manages write optimizations and compaction at the infrastructure level, locking down manual `conf.set()` overrides.
+* **Fix**:
+  * Centralize runtime configuration in `notebooks/00_config.py` using `_safe_conf_set()`.
+  * Wrap each Spark setting in an isolated try-except block to safely apply tunable parameters (e.g. `spark.sql.shuffle.partitions = 4`) while quietly ignoring immutable Serverless properties.
+  * Eliminate all JVM `_jsc` calls from notebooks.
+
+### Failure Mode 7: Photon Engine `[UNSUPPORTED_FEATURE.QUERY_ONLY_CORRUPT_RECORD_COLUMN]` on Corrupt Trap
+* **Symptoms**: Reading raw JSON with `_corrupt_record` fails on Serverless with `AnalysisException: [UNSUPPORTED_FEATURE.QUERY_ONLY_CORRUPT_RECORD_COLUMN] Querying only the column '_corrupt_record' from raw JSON is not supported`.
+* **Root Cause**: The Databricks Photon vectorized engine disallows filtering directly on `_corrupt_record` against streaming unmaterialized JSON files, and DataFrame `.cache()` is disabled on Serverless compute.
+* **Fix**:
+  * Materialize `df_raw` to a temporary Delta staging path (`<bronze_path>_temp_staging`).
+  * Read back the materialized Delta DataFrame before filtering `df_valid` (`col("_corrupt_record").isNull()`) and `df_quarantine` (`col("_corrupt_record").isNotNull()`).
+
+### Failure Mode 8: Accumulation of Duplicate Rows on Ingestion Re-runs
+* **Symptoms**: Re-running Bronze ingestion on a historical batch date doubles the row count in `bronze_ooni_raw`.
+* **Root Cause**: Standard `write.mode("append")` blindly appends new parquet files to the Delta table without checking whether the partition has already been loaded.
+* **Fix**:
+  * Use Delta Lake's partition-scoped overwrite:
+    ```python
+    df_valid_staged.write.format("delta").mode("overwrite") \
+        .option("replaceWhere", f"measurement_date = '{batch_date}'") \
+        .save(bronze_path)
+    ```
+  * This guarantees strict partition-level idempotency: re-running any batch date replaces only that date's data with zero row duplicates.
+
 ---
 
 ## 3. Resource & Dependency Requirements
