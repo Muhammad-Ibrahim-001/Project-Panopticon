@@ -968,12 +968,8 @@ if __name__ == "__main__":
 
     # 1. Test Step 0: Parameter resolution
     init_databricks_widgets()
-    params = resolve_ingestion_parameters(
-        batch_date="2026-09-27", 
-        load_type="incremental", 
-        country_code="PK", 
-        max_records=50
-    )
+    # Dynamically resolves from interactive Databricks Widgets (or defaults)
+    params = resolve_ingestion_parameters()
     print("\n[Step 0 Verified] Ingestion Parameters Resolved:")
     for k, v in params.items():
         print(f"  * {k:<15}: {v}")
