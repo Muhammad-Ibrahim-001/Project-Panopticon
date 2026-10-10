@@ -118,26 +118,36 @@ API_REQUEST_TIMEOUT_SECONDS: int = 30
 def configure_spark_runtime(spark_session) -> None:
     """
     Applies strict memory safeguards, partition tuning, and Delta Lake optimizations
-    tailored specifically for Databricks Community Edition (15 GB RAM, 2 vCPUs).
+    tailored specifically for Databricks Community Edition (15 GB RAM, 2 vCPUs),
+    Serverless Compute, and Dedicated single-node clusters.
     
     Prevents OutOfMemory (OOM) errors during wide transformations and shuffles.
     """
-    sc = spark_session.sparkContext
-    conf = spark_session.conf
+    # Standard configuration via SparkConf (compatible across Serverless, Shared, and Dedicated modes)
+    try:
+        conf = spark_session.conf
+        conf.set("spark.sql.shuffle.partitions", "4")
+        conf.set("spark.databricks.delta.optimizeWrite.enabled", "true")
+        conf.set("spark.databricks.delta.autoCompact.enabled", "true")
+        conf.set(
+            "spark.hadoop.fs.s3a.aws.credentials.provider",
+            "org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider"
+        )
+    except Exception as conf_err:
+        print(f"[Config Warning] Non-blocking SparkConf set: {conf_err}")
 
-    # Limit shuffle partitions to prevent 200 small-task JVM overhead
-    conf.set("spark.sql.shuffle.partitions", "4")
-
-    # Delta Lake file optimization
-    conf.set("spark.databricks.delta.optimizeWrite.enabled", "true")
-    conf.set("spark.databricks.delta.autoCompact.enabled", "true")
-
-    # AWS S3 anonymous credentials for direct public reads if utilized
-    hadoop_conf = sc._jsc.hadoopConfiguration()
-    hadoop_conf.set(
-        "fs.s3a.aws.credentials.provider",
-        "org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider"
-    )
+    # Low-level JVM Hadoop configuration (Dedicated single-node clusters only; safely skipped on Serverless/Shared)
+    try:
+        sc = getattr(spark_session, "sparkContext", None)
+        if sc is not None:
+            hadoop_conf = sc._jsc.hadoopConfiguration()
+            hadoop_conf.set(
+                "fs.s3a.aws.credentials.provider",
+                "org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider"
+            )
+    except Exception:
+        # Expected and safe no-op on Serverless or Standard/Shared access mode clusters
+        pass
 
 
 # ------------------------------------------------------------------------------
