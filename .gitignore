@@ -12,3 +12,11 @@ __pycache__/
 .env/
 venv/
 env/
+
+# Data Lakehouse local storage (samples and schemas remain tracked)
+data/raw/
+data/bronze/
+data/silver/
+data/quarantine/
+data/logs/
+data/reference/
