@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # ==============================================================================
 # PIPELINE DEPENDENCY & IMPACT TRACKING
 # ==============================================================================
@@ -49,7 +53,7 @@ from urllib3.util.retry import Retry
 try:
     from pyspark.sql import SparkSession, DataFrame
     from pyspark.sql.functions import (
-        col, lit, current_timestamp, input_file_name,
+        col, lit, current_timestamp,
         to_date, to_timestamp, substring, coalesce, when
     )
     from pyspark.sql.types import (
@@ -680,14 +684,21 @@ def process_and_quarantine_corrupt_records(
 
     target_quarantine = quarantine_path or config.PATHS["quarantine"]
     
-    df_corrupt = df_raw.filter(col("_corrupt_record").isNotNull())
+    # Materialize raw DataFrame to a temporary Delta table to work around
+    # Serverless restrictions: .cache() is not supported (PERSIST TABLE), and
+    # querying only the _corrupt_record column from raw JSON files is blocked by Photon
+    temp_staging_path = f"{config.PATHS['bronze']}_temp_staging"
+    df_raw.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(temp_staging_path)
+    df_materialized = spark.read.format("delta").load(temp_staging_path)
+    
+    df_corrupt = df_materialized.filter(col("_corrupt_record").isNotNull())
     quarantine_count = df_corrupt.count()
     
     if quarantine_count > 0:
         print(f"[Quarantine Router] Diverting {quarantine_count} corrupt records to: {target_quarantine}")
         df_quarantine_staged = df_corrupt.select(
             col("_corrupt_record").alias("raw_record"),
-            coalesce(when(input_file_name() != "", input_file_name()), lit("RAW_LANDING")).alias("_source_file"),
+            lit("RAW_LANDING").alias("_source_file"),
             lit(batch_id).alias("_batch_id"),
             current_timestamp().alias("quarantine_timestamp"),
             lit("Schema-on-Read parse violation in PERMISSIVE mode").alias("quarantine_reason")
@@ -701,7 +712,7 @@ def process_and_quarantine_corrupt_records(
         )
         print(f"[Quarantine Router] Successfully recorded {quarantine_count} quarantined records.")
         
-    df_valid = df_raw.filter(col("_corrupt_record").isNull()).drop("_corrupt_record")
+    df_valid = df_materialized.filter(col("_corrupt_record").isNull()).drop("_corrupt_record")
     return df_valid, quarantine_count
 
 
@@ -718,10 +729,7 @@ def stage_bronze_dataframe(
     if not HAS_PYSPARK:
         raise RuntimeError("[01_bronze_ingestion] PySpark is required for staging DataFrame.")
 
-    source_file_expr = coalesce(
-        when(input_file_name() != "", input_file_name()),
-        lit(source_provenance)
-    )
+    source_file_expr = lit(source_provenance)
 
     # Multi-format parsing prevents silent null drops flagged in adversarial review
     measurement_date_expr = coalesce(
@@ -732,13 +740,12 @@ def stage_bronze_dataframe(
         to_date(lit(batch_date), "yyyy-MM-dd")
     )
 
-    return (
-        df_valid
-        .withColumn("load_timestamp", current_timestamp())
-        .withColumn("_source_file", source_file_expr)
-        .withColumn("_batch_id", lit(batch_id))
-        .withColumn("measurement_date", measurement_date_expr)
-    )
+    return df_valid.withColumns({
+        "load_timestamp": current_timestamp(),
+        "_source_file": source_file_expr,
+        "_batch_id": lit(batch_id),
+        "measurement_date": measurement_date_expr,
+    })
 
 
 def write_bronze_delta_table(
@@ -1027,4 +1034,3 @@ if __name__ == "__main__":
     print("\n" + "=" * 75)
     print(" ALL BRONZE INGESTION ENGINE PHASES SUCCESSFULLY ASSEMBLED")
     print("=" * 75)
-

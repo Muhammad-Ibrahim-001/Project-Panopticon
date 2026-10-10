@@ -115,6 +115,17 @@ API_REQUEST_TIMEOUT_SECONDS: int = 30
 # 4. Databricks Community Edition Spark Safeguards
 # ------------------------------------------------------------------------------
 
+def _safe_conf_set(conf, key: str, value: str) -> None:
+    """
+    Wraps spark.conf.set() so that Serverless-incompatible keys are silently skipped
+    instead of aborting the entire configuration block.
+    """
+    try:
+        conf.set(key, value)
+    except Exception:
+        pass  # Config key not available on this compute tier — safe no-op
+
+
 def configure_spark_runtime(spark_session) -> None:
     """
     Applies strict memory safeguards, partition tuning, and Delta Lake optimizations
@@ -122,32 +133,21 @@ def configure_spark_runtime(spark_session) -> None:
     Serverless Compute, and Dedicated single-node clusters.
     
     Prevents OutOfMemory (OOM) errors during wide transformations and shuffles.
+    All config sets are wrapped individually so one failure does not block others.
+    Serverless-incompatible keys (optimizeWrite, autoCompact, Hadoop S3 credentials)
+    are silently skipped on Serverless/Shared clusters.
     """
-    # Standard configuration via SparkConf (compatible across Serverless, Shared, and Dedicated modes)
-    try:
-        conf = spark_session.conf
-        conf.set("spark.sql.shuffle.partitions", "4")
-        conf.set("spark.databricks.delta.optimizeWrite.enabled", "true")
-        conf.set("spark.databricks.delta.autoCompact.enabled", "true")
-        conf.set(
-            "spark.hadoop.fs.s3a.aws.credentials.provider",
-            "org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider"
-        )
-    except Exception as conf_err:
-        print(f"[Config Warning] Non-blocking SparkConf set: {conf_err}")
+    conf = spark_session.conf
 
-    # Low-level JVM Hadoop configuration (Dedicated single-node clusters only; safely skipped on Serverless/Shared)
-    try:
-        sc = getattr(spark_session, "sparkContext", None)
-        if sc is not None:
-            hadoop_conf = sc._jsc.hadoopConfiguration()
-            hadoop_conf.set(
-                "fs.s3a.aws.credentials.provider",
-                "org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider"
-            )
-    except Exception:
-        # Expected and safe no-op on Serverless or Standard/Shared access mode clusters
-        pass
+    # Each config wrapped individually — some keys are not available on Serverless
+    _safe_conf_set(conf, "spark.sql.shuffle.partitions", "4")
+    _safe_conf_set(conf, "spark.databricks.delta.optimizeWrite.enabled", "true")
+    _safe_conf_set(conf, "spark.databricks.delta.autoCompact.enabled", "true")
+    _safe_conf_set(
+        conf,
+        "spark.hadoop.fs.s3a.aws.credentials.provider",
+        "org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider",
+    )
 
 
 # ------------------------------------------------------------------------------
