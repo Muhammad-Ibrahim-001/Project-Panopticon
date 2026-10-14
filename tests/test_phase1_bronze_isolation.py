@@ -71,8 +71,19 @@ from datetime import datetime, date
 try:
     workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 except NameError:
-    # In Databricks notebooks, __file__ is not defined — use known workspace path
-    workspace_root = "/Workspace/Repos/Project Panopticon/Project-Panopticon"
+    # In Databricks notebooks, __file__ is not defined — detect dynamically from cwd
+    _cwd = os.getcwd()
+    if os.path.exists(os.path.join(_cwd, "notebooks", "01_bronze_ingestion.py")):
+        workspace_root = _cwd
+    elif os.path.exists(os.path.join(_cwd, "..", "notebooks", "01_bronze_ingestion.py")):
+        workspace_root = os.path.abspath(os.path.join(_cwd, ".."))
+    else:
+        # Fallback to standard Databricks Repos paths
+        _candidates = [
+            "/Workspace/Repos/Project Panopticon/Project-Panopticon",
+            "/Workspace/Users/current/Project-Panopticon"
+        ]
+        workspace_root = next((p for p in _candidates if os.path.exists(p)), _candidates[0])
 if workspace_root not in sys.path:
     sys.path.insert(0, workspace_root)
 
@@ -103,6 +114,19 @@ try:
     HAS_PYSPARK = True
 except ImportError:
     HAS_PYSPARK = False
+
+    class _MockField:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _MockType:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    StructType = _MockType
+    StructField = _MockField
+    StringType = DateType = TimestampType = DoubleType = lambda *a, **k: _MockField()
+    SparkSession = Row = DeltaTable = None
 
 
 # COMMAND ----------

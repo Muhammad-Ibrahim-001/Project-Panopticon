@@ -1158,6 +1158,50 @@ def write_bronze_delta_table(
     if not fetched_dates:
         fetched_dates = [batch_date]
 
+    # --------------------------------------------------------------------------
+    # PRE-FLIGHT VALIDATION: Manifest Scope Contract (Full / Backfill)
+    # --------------------------------------------------------------------------
+    if manifest is not None and load_type in ("full", "backfill"):
+        unauthorized_dates = set(fetched_dates) - set(manifest.authorized_replacement_dates)
+        if unauthorized_dates:
+            raise ValueError(
+                f"[Bronze Persistence CONTRACT VIOLATION] Incoming DataFrame contains dates {sorted(unauthorized_dates)} "
+                f"outside authorized manifest replacement scope {manifest.authorized_replacement_dates}. Write aborted."
+            )
+
+    # --------------------------------------------------------------------------
+    # DETERMINISTIC SOURCE DEDUPLICATION VIA WINDOW RANKING:
+    # Eliminates non-deterministic duplicate keys across ALL write paths (initial, incremental, backfill).
+    # Strict Precedence Hierarchy:
+    #   1. Record Provenance: Prefer records with explicit OONI measurement_uid
+    #   2. Payload Richness: Prefer records with populated test_keys (actual test telemetry)
+    #   3. Source Test Session Time: Prefer later test_start_time
+    #   4. Source Test Runtime: Prefer more complete runtime
+    #   5. Cryptographic 256-bit Payload Hash: SHA-256 over all key payload attributes
+    #      (test_keys, annotations, probe_ip, resolver_ip, software_version, _source_file).
+    # --------------------------------------------------------------------------
+    dedup_keys = ["probe_cc", "measurement_date", "report_id", "measurement_start_time", "test_name", "input"]
+    window_spec = Window.partitionBy([col(k) for k in dedup_keys]).orderBy(
+        when(col("measurement_uid").isNotNull() & (col("measurement_uid") != lit("")), 1).otherwise(0).desc(),
+        when(col("test_keys").isNotNull() & (col("test_keys") != lit("")), 1).otherwise(0).desc(),
+        coalesce(col("test_start_time"), lit("")).desc(),
+        coalesce(col("test_runtime"), lit(0.0)).desc(),
+        sha2(
+            concat_ws(
+                "||",
+                coalesce(col("test_keys"), lit("")),
+                coalesce(col("annotations"), lit("")),
+                coalesce(col("probe_ip"), lit("")),
+                coalesce(col("resolver_ip"), lit("")),
+                coalesce(col("software_version"), lit("")),
+                coalesce(col("_source_file"), lit(""))
+            ),
+            256
+        ).desc()
+    )
+    df_ranked = df_bronze.withColumn("_panopticon_rank", row_number().over(window_spec))
+    df_source_dedup = df_ranked.filter(col("_panopticon_rank") == 1).drop("_panopticon_rank")
+
     # Check table existence
     table_exists = False
     try:
@@ -1174,7 +1218,7 @@ def write_bronze_delta_table(
         print(f"  * Initial Batch Scope  : country={clean_country}, dates={fetched_dates}")
         
         (
-            df_bronze.write
+            df_source_dedup.write
             .format("delta")
             .mode("overwrite")
             .partitionBy("probe_cc", "measurement_date")
@@ -1182,7 +1226,8 @@ def write_bronze_delta_table(
         )
         
         _register_metastore_table(spark, target_bronze)
-        return {"rows_inserted": incoming_count, "rows_updated": 0, "rows_written": incoming_count}
+        dedup_count = df_source_dedup.count()
+        return {"rows_inserted": dedup_count, "rows_updated": 0, "rows_written": dedup_count}
 
     # --------------------------------------------------------------------------
     # SCENARIO B: Incremental Load (Keyed Delta MERGE INTO - Zero Deletion Guarantee)
@@ -1193,38 +1238,7 @@ def write_bronze_delta_table(
         
         delta_target = DeltaTable.forPath(spark, target_bronze)
 
-        # 1. Deterministic Source Deduplication via Window Ranking:
-        # Eliminates non-deterministic dropDuplicates() arbitration when natural keys collide.
-        # Strict Precedence Hierarchy:
-        #   1. Record Provenance: Prefer records with explicit OONI measurement_uid
-        #   2. Payload Richness: Prefer records with populated test_keys (actual test telemetry)
-        #   3. Source Test Session Time: Prefer later test_start_time
-        #   4. Source Test Runtime: Prefer more complete runtime
-        #   5. Cryptographic 256-bit Payload Hash: SHA-256 over all key payload attributes
-        #      (test_keys, annotations, probe_ip, resolver_ip, software_version, _source_file).
-        dedup_keys = ["probe_cc", "measurement_date", "report_id", "measurement_start_time", "test_name", "input"]
-        window_spec = Window.partitionBy([col(k) for k in dedup_keys]).orderBy(
-            when(col("measurement_uid").isNotNull() & (col("measurement_uid") != lit("")), 1).otherwise(0).desc(),
-            when(col("test_keys").isNotNull() & (col("test_keys") != lit("")), 1).otherwise(0).desc(),
-            coalesce(col("test_start_time"), lit("")).desc(),
-            coalesce(col("test_runtime"), lit(0.0)).desc(),
-            sha2(
-                concat_ws(
-                    "||",
-                    coalesce(col("test_keys"), lit("")),
-                    coalesce(col("annotations"), lit("")),
-                    coalesce(col("probe_ip"), lit("")),
-                    coalesce(col("resolver_ip"), lit("")),
-                    coalesce(col("software_version"), lit("")),
-                    coalesce(col("_source_file"), lit(""))
-                ),
-                256
-            ).desc()
-        )
-        df_ranked = df_bronze.withColumn("_panopticon_rank", row_number().over(window_spec))
-        df_source_dedup = df_ranked.filter(col("_panopticon_rank") == 1).drop("_panopticon_rank")
-
-        # 2. Consistent Composite Natural Key Condition with ANSI null-safe equality (<=>)
+        # Consistent Composite Natural Key Condition with ANSI null-safe equality (<=>)
         merge_condition = (
             "target.probe_cc = source.probe_cc "
             "AND target.measurement_date = source.measurement_date "
@@ -1275,12 +1289,6 @@ def write_bronze_delta_table(
     # --------------------------------------------------------------------------
     else:
         # At this stage, manifest is guaranteed non-None, complete, and validated by the pre-flight gate.
-        unauthorized_dates = set(fetched_dates) - set(manifest.authorized_replacement_dates)
-        if unauthorized_dates:
-            raise ValueError(
-                f"[Bronze Persistence CONTRACT VIOLATION] Incoming DataFrame contains dates {sorted(unauthorized_dates)} "
-                f"outside authorized manifest replacement scope {manifest.authorized_replacement_dates}. Write aborted."
-            )
         target_dates = sorted(list(set(fetched_dates).intersection(set(manifest.authorized_replacement_dates))))
 
         if len(target_dates) == 1:
@@ -1294,15 +1302,16 @@ def write_bronze_delta_table(
         print(f"  * Predicate: [{authoritative_predicate}]")
 
         (
-            df_bronze.write
+            df_source_dedup.write
             .format("delta")
             .mode("overwrite")
             .option("replaceWhere", authoritative_predicate)
             .save(target_bronze)
         )
 
-        print(f"[Bronze Persistence] Scoped partition replacement complete: {incoming_count} rows written.")
-        return {"rows_inserted": incoming_count, "rows_updated": 0, "rows_written": incoming_count}
+        dedup_count = df_source_dedup.count()
+        print(f"[Bronze Persistence] Scoped partition replacement complete: {dedup_count} rows written.")
+        return {"rows_inserted": dedup_count, "rows_updated": 0, "rows_written": dedup_count}
 
 
 def _register_metastore_table(spark: SparkSession, table_path: str) -> None:
