@@ -38,7 +38,10 @@ def is_databricks_environment() -> bool:
 
 
 # Determine root storage base path based on execution environment
-if is_databricks_environment() and os.environ.get("IS_SERVERLESS", "FALSE").upper() == "TRUE":
+if is_databricks_environment() and (
+    os.environ.get("IS_SERVERLESS", "FALSE").upper() == "TRUE" or
+    os.path.exists("/Volumes/workspace/default/panopticon")
+):
     # Serverless compute: DBFS is disabled, use Unity Catalog volume instead
     STORAGE_ROOT = "/Volumes/workspace/default/panopticon"
 elif is_databricks_environment():
