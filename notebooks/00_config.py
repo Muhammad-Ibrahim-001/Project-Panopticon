@@ -188,10 +188,20 @@ def get_pipeline_parameter(param_name: str, default_value: Any) -> Any:
     """
     # Try Databricks widget
     try:
-        import IPython
-        dbutils = IPython.get_ipython().user_ns.get("dbutils")
-        if dbutils:
-            val = dbutils.widgets.get(param_name)
+        d_utils = None
+        if "dbutils" in globals():
+            d_utils = globals()["dbutils"]
+        else:
+            import builtins
+            if hasattr(builtins, "dbutils"):
+                d_utils = getattr(builtins, "dbutils")
+        if d_utils is None:
+            import IPython
+            ipy = IPython.get_ipython()
+            if ipy and "dbutils" in ipy.user_ns:
+                d_utils = ipy.user_ns["dbutils"]
+        if d_utils and hasattr(d_utils, "widgets"):
+            val = d_utils.widgets.get(param_name)
             if val is not None and str(val).strip() != "":
                 return val
     except Exception:

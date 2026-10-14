@@ -287,29 +287,60 @@ def to_local_fs_path(path: str) -> str:
     return path
 
 
+def _get_dbutils():
+    """Safely retrieves dbutils across all Databricks runtimes (Classic, Community, Serverless)."""
+    if "dbutils" in globals():
+        return globals()["dbutils"]
+    try:
+        import builtins
+        if hasattr(builtins, "dbutils"):
+            return getattr(builtins, "dbutils")
+    except Exception:
+        pass
+    try:
+        import IPython
+        ipy = IPython.get_ipython()
+        if ipy:
+            if "dbutils" in ipy.user_ns:
+                return ipy.user_ns["dbutils"]
+            if hasattr(ipy, "kernel") and hasattr(ipy.kernel, "user_ns") and "dbutils" in ipy.kernel.user_ns:
+                return ipy.kernel.user_ns["dbutils"]
+    except Exception:
+        pass
+    try:
+        from pyspark.dbutils import DBUtils
+        spark_sess = SparkSession.getActiveSession() if HAS_PYSPARK else None
+        if spark_sess:
+            return DBUtils(spark_sess)
+    except Exception:
+        pass
+    return None
+
+
 def init_databricks_widgets() -> None:
     """
     Initializes interactive Databricks GUI parameter widgets if running
     inside an interactive Databricks notebook environment.
     Safe no-op in standard CLI or non-Databricks runtimes.
     """
-    try:
-        import IPython
-        ipy = IPython.get_ipython()
-        if ipy and "dbutils" in ipy.user_ns:
-            dbutils = ipy.user_ns["dbutils"]
-            dbutils.widgets.text("batch_date", "2026-09-27", "1. Batch Date (YYYY-MM-DD)")
-            dbutils.widgets.dropdown(
+    d_utils = _get_dbutils()
+    if d_utils and hasattr(d_utils, "widgets"):
+        try:
+            d_utils.widgets.text("batch_date", "2026-09-28", "1. Batch Date (YYYY-MM-DD)")
+            d_utils.widgets.dropdown(
                 "load_type", "incremental", ["full", "incremental", "backfill"], "2. Load Type"
             )
-            dbutils.widgets.dropdown(
+            d_utils.widgets.dropdown(
                 "country_code", config.DEFAULT_COUNTRY, config.FOCUS_COUNTRIES, "3. Target Country"
             )
-            dbutils.widgets.text("max_records", "1000", "4. Max API Records (Demo / Cap)")
-            dbutils.widgets.text("lookback_days", str(config.DEFAULT_LOOKBACK_DAYS), "5. Rolling Lookback Days")
-    except Exception:
-        # Not running in an interactive Databricks widget session
-        pass
+            d_utils.widgets.text("max_records", "1000", "4. Max API Records (Demo / Cap)")
+            d_utils.widgets.text("lookback_days", str(config.DEFAULT_LOOKBACK_DAYS), "5. Rolling Lookback Days")
+        except Exception as e:
+            print(f"[Widgets Warning] Could not initialize widgets: {e}")
+
+
+# Initialize Databricks widgets immediately when this cell executes
+init_databricks_widgets()
 
 
 def resolve_ingestion_parameters(
