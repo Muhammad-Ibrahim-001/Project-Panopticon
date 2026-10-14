@@ -1,3 +1,4 @@
+# Databricks notebook source
 # ==============================================================================
 # PIPELINE DEPENDENCY & IMPACT TRACKING
 # ==============================================================================
@@ -83,6 +84,12 @@ except ImportError:
     HAS_PYSPARK = False
 
 
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ## Part 1: Phase 1 Offline Logic Unit Tests
+# MAGIC Validates predicate building, date scope derivation, SQL three-valued logic traps, and IngestionManifest safety contracts without requiring a live Spark cluster.
+
+# COMMAND ----------
 class TestPhase1OfflineLogic(unittest.TestCase):
     """
     Offline unit tests validating predicate building, date scope derivation,
@@ -389,6 +396,12 @@ class TestPhase1OfflineLogic(unittest.TestCase):
         self.assertEqual(ranked[0]["measurement_uid"], "uid_12345")
 
 
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ## Part 2: Live Spark & Delta Lake Integration Tests
+# MAGIC Validates partition isolation, historical date preservation, merge idempotency, schema enforcement, and quarantine gates against live Delta Lake storage.
+
+# COMMAND ----------
 @unittest.skipUnless(HAS_PYSPARK, "PySpark & Delta Lake not available in current Python environment")
 class TestPhase1SparkIntegration(unittest.TestCase):
     """
@@ -398,20 +411,35 @@ class TestPhase1SparkIntegration(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.spark = (
-            SparkSession.builder
-            .appName("Panopticon_Phase1_Hardened_Test")
-            .master("local[2]")
-            .config("spark.sql.shuffle.partitions", "2")
-            .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-            .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-            .getOrCreate()
-        )
+        # In Databricks, reuse the existing cluster SparkSession; in standalone local environments, initialize a session
+        cls._stopped_spark_needed = False
+        try:
+            cls.spark = SparkSession.getActiveSession()
+        except Exception:
+            cls.spark = None
+
+        if cls.spark is None:
+            cls.spark = (
+                SparkSession.builder
+                .appName("Panopticon_Phase1_Hardened_Test")
+                .master("local[2]")
+                .config("spark.sql.shuffle.partitions", "2")
+                .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+                .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+                .getOrCreate()
+            )
+            cls._stopped_spark_needed = True
+
         cls.test_dir = tempfile.mkdtemp(prefix="panopticon_test_bronze_")
 
     @classmethod
     def tearDownClass(cls):
-        cls.spark.stop()
+        # Do not stop the shared SparkContext inside Databricks
+        if getattr(cls, "_stopped_spark_needed", False) and cls.spark:
+            try:
+                cls.spark.stop()
+            except Exception:
+                pass
         if os.path.exists(cls.test_dir):
             shutil.rmtree(cls.test_dir, ignore_errors=True)
 
@@ -769,5 +797,32 @@ class TestPhase1SparkIntegration(unittest.TestCase):
         self.assertEqual(delta_df.count(), 1, "Tie was not resolved into single deterministic row!")
 
 
-if __name__ == "__main__":
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ## Part 3: Test Runner Execution
+# MAGIC Execute the cell below to run the complete 27-test validation suite directly in Databricks.
+
+# COMMAND ----------
+def run_all_tests():
+    """
+    Executes all 27 unit and Delta Lake integration tests safely inside Databricks.
+    Avoids calling sys.exit() so the notebook kernel stays alive.
+    """
+    suite = unittest.TestSuite()
+    suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestPhase1OfflineLogic))
+    suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestPhase1SparkIntegration))
+
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    if not result.wasSuccessful():
+        print(f"\n[WARNING] Tests encountered issues! Failures: {len(result.failures)}, Errors: {len(result.errors)}")
+    else:
+        print(f"\n[SUCCESS] All {result.testsRun} tests passed successfully!")
+    return result
+
+# COMMAND ----------
+# Trigger test execution in Databricks or standalone CLI
+if __name__ == "__main__" and "DATABRICKS_RUNTIME_VERSION" not in os.environ:
     unittest.main(verbosity=2)
+else:
+    run_all_tests()
