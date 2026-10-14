@@ -103,17 +103,41 @@ Import the notebooks from the repository into your Databricks workspace:
   * Materialize `df_raw` to a temporary Delta staging path (`<bronze_path>_temp_staging`).
   * Read back the materialized Delta DataFrame before filtering `df_valid` (`col("_corrupt_record").isNull()`) and `df_quarantine` (`col("_corrupt_record").isNotNull()`).
 
-### Failure Mode 8: Accumulation of Duplicate Rows on Ingestion Re-runs
-* **Symptoms**: Re-running Bronze ingestion on a historical batch date doubles the row count in `bronze_ooni_raw`.
-* **Root Cause**: Standard `write.mode("append")` blindly appends new parquet files to the Delta table without checking whether the partition has already been loaded.
+### Failure Mode 8: Cross-Country & Historical Date Partition Overwrite
+* **Symptoms**: Re-running Bronze ingestion for Pakistan (`PK`) on `2026-09-27` wipes out previously ingested measurements for Iran (`IR`) on that date; or executing an incremental write with lookback deletes historical dates `[T-lookback, T-1]`.
+* **Root Cause**: Partitioning solely by `measurement_date` means a predicate `measurement_date = '2026-09-27'` targets the entire date directory, erasing all other countries. Furthermore, using a range predicate `replaceWhere: measurement_date >= 'T-3' AND measurement_date <= 'T'` when the incoming batch only contains single-day data deletes all historical partitions in the range that are absent from the incoming DataFrame.
 * **Fix**:
-  * Use Delta Lake's partition-scoped overwrite:
+  1. Re-partition Bronze physically by **both** country and date: `PARTITIONED BY (probe_cc, measurement_date)`.
+  2. Scope the partition replacement predicate strictly to both dimensions:
+     ```python
+     df_valid_staged.write.format("delta").mode("overwrite") \
+         .option("replaceWhere", f"probe_cc = '{country_code}' AND measurement_date = '{target_date}'") \
+         .save(bronze_path)
+     ```
+  3. Alternatively, use keyed Delta Lake `MERGE INTO` matching on composite natural keys (`report_id`, `input`, `measurement_start_time`) with ANSI NULL-safe `<=>` comparison.
+
+### Failure Mode 9: Databricks Serverless `CANNOT_DETERMINE_TYPE` & `DBFS_DISABLED`
+* **Symptoms**: Initializing empty mock DataFrames during tests or audit initialization crashes with `[CANNOT_DETERMINE_TYPE] Some schema types cannot be determined from data: []`; or writing to `/tmp` / `/FileStore` fails with `[DBFS_DISABLED] DBFS is disabled in Unity Catalog Serverless`.
+* **Root Cause**: On Databricks Serverless Compute (Spark Connect), `spark.createDataFrame([])` cannot infer schemas from empty collections without explicit `StructType` definitions. Additionally, Serverless restricts public root DBFS paths.
+* **Fix**:
+  1. Always supply explicit `StructType` schemas to `createDataFrame([], schema=EXPLICIT_SCHEMA)`.
+  2. Centralize storage paths to Unity Catalog Volumes (`/Volumes/workspace/default/panopticon/`) rather than `/tmp` or `/dbfs/FileStore`.
+
+### Failure Mode 10: Multi-Country Directory Staging Bleed
+* **Symptoms**: Running ingestion for Pakistan (`PK`) crashes during pre-write validation: `[Country Contract Violation] Staged DataFrame contains 498 records with probe_cc != 'PK'`.
+* **Root Cause**: The raw staging directory `raw/<date>/` contains JSON files for multiple countries (e.g. `ooni_ir_...json` and `ooni_pk_...json`). Calling `spark.read.json(landing_dir)` loads all JSON files in the folder, blending countries into a single batch.
+* **Fix**:
+  * Scope the Spark read path with an explicit country file glob:
     ```python
-    df_valid_staged.write.format("delta").mode("overwrite") \
-        .option("replaceWhere", f"measurement_date = '{batch_date}'") \
-        .save(bronze_path)
+    target_read_path = f"{landing_dir}/ooni_{clean_cc}_*.json"
+    df_raw = spark.read.schema(target_schema).json(target_read_path)
     ```
-  * This guarantees strict partition-level idempotency: re-running any batch date replaces only that date's data with zero row duplicates.
+
+### Failure Mode 11: Ingestion Manifest Validation Bypass on Empty Tables
+* **Symptoms**: First-time ingestion batches bypass manifest checksum and date scope validations, potentially landing corrupt files on day zero.
+* **Root Cause**: Manifest validation logic placed inside `if table_exists:` blocks was skipped when `bronze_ooni_raw` had not yet been created.
+* **Fix**:
+  * Hoist manifest existence, hash verification, and date scope validation to execute **before** the table existence check.
 
 ---
 
@@ -123,7 +147,7 @@ Import the notebooks from the repository into your Databricks workspace:
 | :--- | :--- | :--- |
 | **Operating System** | Windows 10/11, macOS, or Ubuntu 22.04 | Windows 11 with WSL2 / Native Python 3.10+ |
 | **Local Memory (RAM)** | 8 GB RAM | 16 GB RAM |
-| **Cloud Runtime** | Databricks Community Edition (Free) | Databricks CE or Azure Databricks (Standard_D4ds_v5) |
+| **Cloud Runtime** | Databricks Community Edition (Free) | Databricks CE or Serverless UC (`/Volumes/...`) |
 | **Python Version** | Python 3.10 | Python 3.11 / 3.12 |
 | **Primary Libraries** | `pyspark==3.5.0`, `delta-spark==3.0.0` | `pyspark`, `delta-spark`, `python-docx`, `requests` |
 | **BI Tool** | Power BI Desktop (Free) | Power BI Desktop (Latest Version) |

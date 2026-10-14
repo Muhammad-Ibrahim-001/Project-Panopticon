@@ -37,7 +37,7 @@ The pipeline strictly separates execution concerns into three operational modes 
 | `--country-code` / Widget| Focus country (`IR`, `PK`, `RU`) | Monitored country (`IR`, `PK`) | Historical target (`IR`, `PK`) |
 | `--max-records` / Widget| `1000` - `5000` | `1000` - `2000` | Target batch size |
 | `--lookback-days` / Widget| `0` (or full date range) | `3` (Rolling lookback $T-3$ to $T$) | `0` (Target partition only) |
-| **Bronze Write Mode** | `overwrite` with `replaceWhere` (partition-scoped) | `overwrite` with `replaceWhere` (`measurement_date = '<date>'`) | `overwrite` with `replaceWhere` (target date partition) |
+| **Bronze Write Mode** | `overwrite` with scoped `replaceWhere` (`(probe_cc, measurement_date)`) | `overwrite` with scoped `replaceWhere` or keyed Delta `MERGE INTO` | `overwrite` with scoped `replaceWhere` (target country & date) |
 | **Silver Write Mode** | Delta `MERGE INTO` | Delta `MERGE INTO` | Delta `MERGE INTO` |
 | **Audit Log Entry** | `load_type = 'Full'` | `load_type = 'Incremental'` | `load_type = 'Backfill'` |
 
@@ -56,8 +56,8 @@ Databricks Serverless Compute with Photon Engine operates under Unity Catalog go
 4. **Volume Directory Structure**:
    ```text
    /Volumes/workspace/default/panopticon/
-   ├── raw/<batch_date>/            # Programmatically staged JSONL files
-   ├── bronze/bronze_ooni_raw/      # Bronze Delta Lake table (partitioned by measurement_date)
+   ├── raw/<batch_date>/            # Programmatically staged JSONL files (isolated by ooni_{country}_*.json)
+   ├── bronze/bronze_ooni_raw/      # Bronze Delta Lake table (partitioned by probe_cc, measurement_date)
    ├── bronze/quarantine_ooni_raw/  # Corrupt JSON quarantine Delta table
    ├── reference/citizenlab_categories/ # Delta reference table (2,396 records)
    └── logs/pipeline_execution_logs/    # Operational Delta audit logs
@@ -133,7 +133,7 @@ Under course guidelines, manual data uploads via the Databricks UI or local uplo
 4. **Step 3: Photon-Safe Materialization & Partition-Level Idempotent Write**:
    - Materializes the raw read to a temporary Delta staging path (`<bronze_path>_temp_staging`) to safely evaluate `_corrupt_record` under the Photon Engine.
    - Routes malformed JSON lines to `quarantine_ooni_raw`.
-   - Writes valid records to `bronze_ooni_raw` using `mode("overwrite").option("replaceWhere", f"measurement_date = '{batch_date}'")`, ensuring reruns replace the partition without duplicating records.
+   - Writes valid records to `bronze_ooni_raw` using scoped partition overwrite `mode("overwrite").option("replaceWhere", f"probe_cc = '{country_code}' AND measurement_date = '{target_date}'")` or keyed Delta `MERGE INTO` on composite natural keys (`report_id`, `input`, `measurement_start_time`). This guarantees that reruns replace only the target country-date directory with zero row duplication and without erasing other countries or historical dates.
    - Commits execution metrics to `pipeline_execution_logs` via `PipelineAuditor`.
 
 ### 3.3 Running the Standard Daily Incremental Run (With 3-Day Lookback)
@@ -155,7 +155,7 @@ If upstream OONI data for `2026-09-22` was delayed or a transformation bug was r
 3. Set **Country Code**: Target country (e.g. `IR`)
 4. Set **Lookback Days**: `0` (Target date only)
 5. Click **Run All**.
-6. The pipeline re-ingests the partition idempotently. In Bronze, `replaceWhere` cleanly overwrites the target date partition; in Silver, `MERGE INTO` updates enriched attributes without creating duplicate rows.
+6. The pipeline re-ingests the partition idempotently. In Bronze, scoped `replaceWhere` cleanly overwrites the target country-date partition; in Silver, `MERGE INTO` updates enriched attributes without creating duplicate rows.
 
 ---
 
@@ -378,3 +378,31 @@ VACUUM pipeline_execution_logs RETAIN 720 HOURS;
 > -- Then run OPTIMIZE without ZORDER — clustering is applied incrementally
 > OPTIMIZE silver_network_measurements WHERE measurement_date >= date_sub(current_date(), 7);
 > ```
+
+---
+
+## 9. Automated Verification & Unit Test Runbook
+
+Project Panopticon includes a dedicated 27-test automated verification suite in [`tests/test_phase1_bronze_isolation.py`](../../tests/test_phase1_bronze_isolation.py) that validates schema contracts, partition isolation, manifest validation hoisting, and regression fixes.
+
+### 9.1 Offline Unit Testing (Local / CI without Spark)
+The test suite includes complete offline mock schemas and fixtures. Evaluators can run the offline tests in under 1 second without a Spark cluster:
+
+```bash
+# Run the test suite via standard Python unittest
+python -m unittest tests/test_phase1_bronze_isolation.py
+```
+* **Offline Execution**: Runs 11 offline unit tests covering schema definition, nullability invariants, manifest sidecar generation, and hash generation (`Ran 27 tests in 0.007s — OK (skipped=16)`).
+* **Integration Tests**: The 16 Delta Lake and Spark integration tests automatically detect local environment availability (`HAS_PYSPARK`) and skip cleanly if Apache Spark is not installed.
+
+### 9.2 Databricks Community Edition & Serverless Notebook Execution
+The test script is formatted as a native Databricks notebook with `# Databricks notebook source` tags:
+1. Import `tests/test_phase1_bronze_isolation.py` into your Databricks workspace.
+2. Attach it to your interactive cluster (Community Edition) or Serverless compute.
+3. Click **Run All**.
+4. Cell 1 sets up imports and schema contracts.
+5. Cell 2 executes all 27 unit and integration tests live against Unity Catalog Volume scratch space (`/Volumes/workspace/default/panopticon/scratch/test_isolation_...`):
+   - Verifies that writing Pakistan (`PK`) data for `2026-09-27` leaves Iran (`IR`) data for `2026-09-27` intact.
+   - Verifies that incremental writes do not wipe out historical dates `[T-lookback, T-1]`.
+   - Verifies that manifest scope validation executes before table creation.
+   - Verifies that raw JSON staging filters files by `ooni_{clean_cc}_*.json` to eliminate multi-country staging bleed.

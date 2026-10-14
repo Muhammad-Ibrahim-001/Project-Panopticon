@@ -148,19 +148,19 @@ Stores raw, unmanipulated records landed with audit metadata.
 | `_source_file` | `StringType` | No | No | **[Audit]** Input file name / S3 path |
 | `_batch_id` | `StringType` | No | No | **[Audit]** Execution batch parameter / date |
 
-**Bronze Idempotency Note (verified from Delta Lake docs)**:
-`df.write.format("delta").mode("append")` is **not idempotent** — re-running the same batch creates duplicate rows in Bronze. The correct pattern for partition-level idempotency is `replaceWhere`:
+**Bronze Idempotency & Partition Isolation Note (verified from Delta Lake docs)**:
+`df.write.format("delta").mode("append")` is **not idempotent** — re-running the same batch creates duplicate rows in Bronze. Furthermore, partitioning solely by `measurement_date` causes single-country writes to erase other countries for that date. The production pattern is composite partitioning by `(probe_cc, measurement_date)` with scoped `replaceWhere` or keyed Delta `MERGE INTO`:
 ```python
-# Idempotent Bronze write: overwrites only the matching date partition.
-# If the batch is re-run for the same date, the partition is replaced, not appended.
-# Source: docs.delta.io — Delta Lake batch writes, replaceWhere option.
+# Idempotent Bronze write: overwrites only the matching country and date partition.
+# If the batch is re-run for Pakistan on 2026-09-27, only probe_cc=PK/measurement_date=2026-09-27
+# is replaced; Iran (IR) and Russia (RU) partitions remain completely untouched.
 df_valid.write \
     .format("delta") \
     .mode("overwrite") \
-    .option("replaceWhere", f"measurement_date = '{batch_date}'") \
+    .option("replaceWhere", f"probe_cc = '{country_code}' AND measurement_date = '{batch_date}'") \
     .save(bronze_path)
 ```
-This is safe because each Bronze batch is scoped to a single `measurement_date` partition (the `batch_date` parameter). Re-running for the same date cleanly replaces that partition without touching other dates.
+This guarantees strict isolation across both geographical and temporal dimensions. Re-running any country batch cleanly replaces only that partition without touching other countries or historical dates.
 
 ### 4.2 Silver Layer: `silver_network_measurements`
 Cleansed, flattened, typed, PII-sanitized, and enriched with Citizen Lab categories.
@@ -407,17 +407,25 @@ Panopticon/
 │   ├── 00_audit_logger.py          # Operational logging utility & table setup
 │   ├── 01_bronze_ingestion.py       # Strict schema-on-read ingestion + quarantine + metadata
 │   ├── 02_silver_transformation.py  # Cleansing, casting, PII masking, flattening & Delta MERGE
+│   ├── 03_gold_dimensional_modeling.py # Star Schema dimensional modeling & rollups
 │   └── run_pipeline.py              # Parameterized runner (Incremental vs Backfill)
+├── tests/
+│   ├── test_phase1_bronze_isolation.py # 27 unit/integration tests (local & Databricks runnable)
+│   └── troubleshooting/             # Databricks Genie audit & serverless migration notes
+│       └── serverless-test-migration.md
+├── panopticon_remediation_plan.md   # Phased engineering roadmap & compliance tracking
+├── panopticon_adversarial_review.md # Senior staff architectural review & threat models
+├── bronze_layer_engineering_audit.md # 12-dimension technical audit of Bronze ingestion
 ├── data/
 │   ├── samples/                     # Existing sample datasets
-│   ├── bronze/                      # Delta Lake Bronze storage location
-│   ├── silver/                      # Delta Lake Silver storage location
-│   ├── quarantine/                  # Delta Lake Quarantine storage location
-│   └── logs/                        # Operational audit log Delta storage location
+│   └── schemas/                     # Strict JSON schema contracts (Bronze & Silver)
 ├── Docs/
+│   ├── Phase 1/
+│   │   └── phase1_proposal.md       # Formal academic proposal
 │   ├── Phase 2/
 │   │   ├── phase2_implementation_plan.md  # Complete requirements & implementation guide
 │   │   ├── 06_data_dictionary.md          # Comprehensive Bronze & Silver Data Dictionaries
 │   │   └── 07_execution_guide.md          # Parameterized execution manual
+│   └── Future & Reference/          # Production deployment, troubleshooting & curriculum guides
 └── README.md                        # Updated with data models & submission links
 ```

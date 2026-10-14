@@ -46,6 +46,9 @@ Project-Panopticon/
 ├── README.md                                  # Executive lakehouse guide & project overview
 ├── .gitignore                                 # Production environment & secret ignore rules
 ├── AGENTS.md                                  # Operational guidelines & developer practices
+├── panopticon_remediation_plan.md             # Phased engineering roadmap & compliance tracking
+├── panopticon_adversarial_review.md           # Senior staff architectural review & threat models
+├── bronze_layer_engineering_audit.md          # 12-dimension technical audit of Bronze ingestion
 ├── Docs/                                      # Structured documentation suite
 │   ├── .docx/                                 # Word documents for academic submission
 │   │   └── phase1_proposal.docx               # Executive Word Document Version
@@ -73,13 +76,17 @@ Project-Panopticon/
 │   └── schemas/                               # Machine-readable PySpark StructType contracts
 │       ├── bronze_ooni_schema.json            # Bronze strict Schema-on-Read contract
 │       └── silver_conformed_schema.json       # Silver cleansed & enriched schema contract
-└── notebooks/                                 # Implementation PySpark pipelines
-    ├── 00_config.py                           # Central configuration, DBFS/local paths & API endpoints
-    ├── 00_audit_logger.py                     # Context manager & operational Delta logger
-    ├── 01_bronze_ingestion.py                 # Schema-on-read ingestion + quarantine + metadata
-    ├── 02_silver_transformation.py            # PII masking, array flattening & Delta MERGE
-    ├── 03_gold_dimensional_modeling.py       # Star Schema dimensional modeling & rollups
-    └── run_pipeline.py                        # Parameterized runner (Incremental vs Backfill)
+├── notebooks/                                 # Implementation PySpark pipelines
+│   ├── 00_config.py                           # Central configuration, DBFS/local paths & API endpoints
+│   ├── 00_audit_logger.py                     # Context manager & operational Delta logger
+│   ├── 01_bronze_ingestion.py                 # Schema-on-read ingestion + quarantine + metadata
+│   ├── 02_silver_transformation.py            # PII masking, array flattening & Delta MERGE
+│   ├── 03_gold_dimensional_modeling.py       # Star Schema dimensional modeling & rollups
+│   └── run_pipeline.py                        # Parameterized runner (Incremental vs Backfill)
+└── tests/                                     # Comprehensive testing & validation suite
+    ├── test_phase1_bronze_isolation.py        # 27 unit/integration tests (local & Databricks runnable)
+    └── troubleshooting/                       # Databricks Genie audit & serverless migration notes
+        └── serverless-test-migration.md       # Root-cause analysis & Genie test enhancements
 ```
 
 ---
@@ -87,9 +94,17 @@ Project-Panopticon/
 ## 📊 Medallion Data Models Summary
 
 ### Bronze Layer: `bronze_ooni_raw` (Raw Ingestion Landing)
-* **Storage**: Delta Lake (Snappy Compressed) | `PARTITIONED BY (measurement_date)` | Target path: `/Volumes/workspace/default/panopticon/bronze/bronze_ooni_raw`
-* **Idempotency**: Partition-scoped overwrite via `replaceWhere (measurement_date = '<batch_date>')` ensures duplicate-free re-runs.
-* **Core Columns**: `report_id` (String), `input` (String), `test_name` (String), `measurement_start_time` (String), `probe_asn` (String), `probe_cc` (String), `probe_ip` (String), `probe_network_name` (String), `resolver_asn` (String), `resolver_ip` (String), `test_runtime` (Double), `test_keys` (**StringType — raw JSON string**; polymorphic union type parsed per `test_name` in Silver), `load_timestamp` (Timestamp - Audit), `_source_file` (String - Audit), `_batch_id` (String - Audit), `_corrupt_record` (String - Quarantine).
+* **Storage**: Delta Lake (Snappy Compressed) | `PARTITIONED BY (probe_cc, measurement_date)` | Target path: `/Volumes/workspace/default/panopticon/bronze/bronze_ooni_raw` (Databricks Serverless UC) or `/FileStore/tables/panopticon/bronze/bronze_ooni_raw` (Community Edition DBFS)
+* **Idempotency & Isolation**:
+  - **Partition Overwrite**: Scoped `replaceWhere (probe_cc = '<country_code>' AND measurement_date = '<target_date>')` guarantees that historical dates and other countries are never accidentally erased during incremental writes.
+  - **Delta MERGE INTO**: Keyed merge with ANSI NULL-safe `<=>` matching on composite natural keys (`report_id`, `input`, `measurement_start_time`) with deterministic window deduplication (`_panopticon_rank`).
+  - **Staging Isolation**: Raw JSON reading is explicitly scoped by country glob (`ooni_{clean_cc}_*.json`) preventing cross-country file bleeding when staging multiple countries under the same date partition.
+  - **Ingestion Manifest**: Programmatic REST API fetcher produces an authoritative `IngestionManifest` sidecar (`_manifest.json`) recording payload SHA-256 checksums, byte sizes, and record counts. Manifest validation is hoisted before table existence checks to guarantee strict data integrity.
+* **Core Columns (26 total)**:
+  - Natural Telemetry (22): `measurement_uid` (String), `report_id` (String), `input` (String), `test_name` (String), `measurement_start_time` (String), `test_start_time` (String), `probe_asn` (String), `probe_cc` (String - Partition Key), `probe_id` (String), `probe_ip` (String), `probe_network_name` (String), `resolver_asn` (String), `resolver_ip` (String), `resolver_network_name` (String), `test_runtime` (Double), `software_name` (String), `software_version` (String), `test_version` (String), `data_format_version` (String), `annotations` (String), `test_helpers` (String), `test_keys` (**StringType — raw JSON string**; polymorphic union type parsed per `test_name` in Silver).
+  - Derived Partition Key (1): `measurement_date` (Date - Partition Key).
+  - Ingestion Lineage & Audit (3): `load_timestamp` (Timestamp - Audit), `_source_file` (String - Audit), `_batch_id` (String - Audit).
+  - Permissive Trap Column (Pre-Quarantine): `_corrupt_record` (String; diverted to `quarantine_ooni_raw`).
 
 ### Silver Layer: `silver_network_measurements` (Cleansed, Sanitized, Enriched)
 * **Storage**: Delta Lake (Snappy Compressed) | `PARTITIONED BY (measurement_date)` | `ZORDER BY (probe_cc, probe_asn, tampering_vector)`
@@ -157,6 +172,16 @@ python notebooks/run_pipeline.py \
 python notebooks/run_pipeline.py \
     --batch-date "2026-09-22" \
     --load-type "backfill"
+```
+
+### Running the Test Suite (27 Unit & Integration Tests)
+The test suite validates schema enforcement, partition safety, manifest integrity, and isolation contracts:
+```bash
+# Run tests offline without PySpark installed (all 11 offline unit tests pass in < 0.01s)
+python -m unittest tests/test_phase1_bronze_isolation.py
+
+# On Databricks Community Edition / Serverless:
+# Open tests/test_phase1_bronze_isolation.py directly as a notebook and click "Run All"
 ```
 
 > *For complete step-by-step instructions on Databricks Community Edition and local run environments, see [Docs/Phase 2/07_execution_guide.md](Docs/Phase%202/07_execution_guide.md).*

@@ -1,10 +1,10 @@
 # Project Panopticon: Phased Engineering Remediation Plan
 ## End-to-End Lakehouse Architecture & Implementation Roadmap
-**Document Version**: 2.0.0  
+**Document Version**: 2.1.0  
 **Target Architecture**: Apache Spark 3.5 / Delta Lake 3.0 on Databricks Community Edition & Serverless  
 **Target Repository**: `Muhammad-Ibrahim-001/Project-Panopticon`  
 **Author**: Principal Data Lakehouse Architect & Lead Engineering Reviewer  
-**Status**: APPROVED FOR EXECUTION  
+**Status**: PHASES 1–4 COMPLETED & VERIFIED ON DATABRICKS | PHASE 5 PENDING  
 
 ---
 
@@ -15,18 +15,18 @@ Following the comprehensive audit of the Bronze layer, this document establishes
 The work is strictly structured into **six sequential implementation phases** prioritized by risk and rubric severity:
 
 ```text
-┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                               PHASED REMEDIATION & BUILD ROADMAP                                 │
-├────────────────────┬──────────┬──────────────────────────────────────────┬───────────────────────┤
-│ Phase              │ Priority │ Focus Area                               │ Core Deliverable      │
-├────────────────────┼──────────┼──────────────────────────────────────────┼───────────────────────┤
-│ Phase 1            │ P0 · CRIT│ Bronze Partition-Overwrite & Data Loss   │ Atomic Partitioning   │
-│ Phase 2            │ P0 · CRIT│ Ingestion State & Fallback Quarantine    │ Ingestion Engine 2.0  │
-│ Phase 3            │ P1 · HIGH│ Unified Authoritative Bronze Schema      │ 24-Field Contract     │
-│ Phase 4            │ P1 · HIGH│ Lookback & Parameterized Backfills       │ Dual-Pass Ingestion   │
-│ Phase 5            │ P1 · HIGH│ Complete Silver, Gold & Pipeline Runner  │ Full Lakehouse Build  │
-│ Phase 6            │ P2 · MED │ Operational Audit Logging & Telemetry    │ Granular Metrics      │
-└────────────────────┴──────────┴──────────────────────────────────────────┴───────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                       PHASED REMEDIATION & BUILD ROADMAP                                        │
+├────────────────────┬──────────┬──────────────────────────────────────────┬───────────────────────┬──────────────┤
+│ Phase              │ Priority │ Focus Area                               │ Core Deliverable      │ Status       │
+├────────────────────┼──────────┼──────────────────────────────────────────┼───────────────────────┼──────────────┤
+│ Phase 1            │ P0 · CRIT│ Bronze Partition-Overwrite & Data Loss   │ Atomic Partitioning   │ 100% COMPLETE│
+│ Phase 2            │ P0 · CRIT│ Ingestion State & Fallback Quarantine    │ Ingestion Engine 2.0  │ 100% COMPLETE│
+│ Phase 3            │ P1 · HIGH│ Unified Authoritative Bronze Schema      │ 24-Field Contract     │ 100% COMPLETE│
+│ Phase 4            │ P1 · HIGH│ Lookback & Parameterized Backfills       │ Dual-Pass Ingestion   │ 100% COMPLETE│
+│ Phase 5            │ P1 · HIGH│ Complete Silver, Gold & Pipeline Runner  │ Full Lakehouse Build  │ 0% PENDING   │
+│ Phase 6            │ P2 · MED │ Operational Audit Logging & Telemetry    │ Granular Metrics      │ 70% PROGRESS │
+└────────────────────┴──────────┴──────────────────────────────────────────┴───────────────────────┴──────────────┘
 ```
 
 ---
@@ -782,10 +782,10 @@ Sequentially runs:
 
 ## Readiness & Execution Checklist
 
-Before committing code changes, execute this verification order:
-1. [ ] **Phase 1 Complete**: Re-partition Bronze to `(probe_cc, measurement_date)` and scope `replaceWhere`. Verify cross-country isolation.
-2. [ ] **Phase 2 Complete**: Implement `FetchResult` and `.manifest.json`. Remove silent sample fallback.
-3. [ ] **Phase 3 Complete**: Add `extensions` to `BRONZE_OONI_SCHEMA` and synchronize `bronze_ooni_schema.json`. Enforce non-null natural keys in quarantine router.
-4. [ ] **Phase 4 Complete**: Connect `lookback_days` to API date calculation and support backfills.
-5. [ ] **Phase 5 Complete**: Implement `02_silver_transformation.py`, `03_gold_dimensional_modeling.py`, and `run_pipeline.py`.
-6. [ ] **Phase 6 Complete**: Wire fine-grained audit logger metrics and cleanup temporary staging paths.
+Implementation & verification status:
+1. [x] **Phase 1 Complete (100%)**: Re-partitioned Bronze to `(probe_cc, measurement_date)`, scoped `replaceWhere` on `(probe_cc, measurement_date)`, added keyed Delta `MERGE INTO` with ANSI `<=>` matching, and scoped Spark JSON read to country glob `ooni_{clean_cc}_*.json` to eliminate cross-country directory bleeding.
+2. [x] **Phase 2 Complete (100%)**: Implemented `IngestionManifest` sidecar (`.json` + `_manifest.json`) with SHA-256 payload checksums. Removed silent sample fallback. Hoisted manifest scope validation before table existence checks. Diverted malformed rows to `quarantine_ooni_raw`.
+3. [x] **Phase 3 Complete (100%)**: Standardized explicit 23-field Schema-on-Read contract `BRONZE_OONI_SCHEMA` + 3 audit columns in `notebooks/01_bronze_ingestion.py` and synchronized `data/schemas/bronze_ooni_schema.json`. Polymorphic `test_keys` preserved as raw JSON string. Non-null natural keys strictly enforced.
+4. [x] **Phase 4 Complete (100%)**: Connected `lookback_days` to API date calculation and multi-date loop. Multi-date split writes and atomic Delta MERGE INTO across dates with partition pruning fully operational and verified.
+5. [ ] **Phase 5 Pending (0%)**: Next sprint: Implement `02_silver_transformation.py` (PII masking, array exploding, Citizen Lab bare domain join, Delta MERGE), `03_gold_dimensional_modeling.py` (Star schema fact/dimension tables, CAI metrics), and `notebooks/run_pipeline.py` (orchestrator).
+6. [x] **Phase 6 In Progress (~70%)**: `notebooks/00_audit_logger.py` implemented with `PipelineAuditor` context manager and 13-column `pipeline_execution_logs` operational Delta table. Bronze execution fully instrumented. Pending: wire fine-grained Delta MERGE metrics in Silver/Gold and add automated staging vacuuming.
