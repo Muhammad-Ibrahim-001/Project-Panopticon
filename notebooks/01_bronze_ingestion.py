@@ -1449,10 +1449,20 @@ def ingest_raw_to_bronze(
             )
             source_label = f"OONI_API_{params['country_code']}_{params['batch_date']}"
 
+        # Scope raw landing source path strictly to requested country if reading from a multi-country directory
+        target_read_path = landing_dir
+        local_landing = to_local_fs_path(landing_dir)
+        clean_cc = str(params["country_code"]).lower()
+        if os.path.isdir(local_landing):
+            import glob
+            country_pattern = os.path.join(local_landing, f"ooni_{clean_cc}_*.json")
+            if glob.glob(country_pattern):
+                target_read_path = f"{landing_dir}/ooni_{clean_cc}_*.json"
+
         # Step 2 & 3A: Strict Schema-on-Read ingestion
         df_raw = read_raw_telemetry_dataframe(
             spark=resolved_spark,
-            source_path=landing_dir,
+            source_path=target_read_path,
             schema=get_bronze_schema()
         )
         total_rows_read = df_raw.count()
