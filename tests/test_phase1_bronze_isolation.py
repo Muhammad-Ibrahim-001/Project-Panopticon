@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # ==============================================================================
 # PIPELINE DEPENDENCY & IMPACT TRACKING
 # ==============================================================================
@@ -64,20 +68,37 @@ import unittest
 from datetime import datetime, date
 
 # Self-bootstrapping for Databricks runtime and standalone executions
-workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+try:
+    workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+except NameError:
+    # In Databricks notebooks, __file__ is not defined — use known workspace path
+    workspace_root = "/Workspace/Repos/Project Panopticon/Project-Panopticon"
 if workspace_root not in sys.path:
     sys.path.insert(0, workspace_root)
 
 import importlib
 try:
     bronze_mod = importlib.import_module("notebooks.01_bronze_ingestion")
-except ModuleNotFoundError:
-    bronze_mod = importlib.import_module("01_bronze_ingestion")
+except Exception:
+    try:
+        bronze_mod = importlib.import_module("01_bronze_ingestion")
+    except Exception:
+        # On Databricks Serverless, workspace .py files are treated as notebooks
+        # and can't be imported via importlib — read and exec directly
+        import types
+        _mod_path = os.path.join(workspace_root, "notebooks", "01_bronze_ingestion.py")
+        bronze_mod = types.ModuleType("01_bronze_ingestion")
+        bronze_mod.__file__ = _mod_path
+        _notebooks_dir = os.path.join(workspace_root, "notebooks")
+        if _notebooks_dir not in sys.path:
+            sys.path.insert(0, _notebooks_dir)
+        with open(_mod_path) as _f:
+            exec(compile(_f.read(), _mod_path, "exec"), bronze_mod.__dict__)
 
 # Check if running in a Spark environment
 try:
     from pyspark.sql import SparkSession, Row
-    from pyspark.sql.types import StructType, StructField, StringType, DateType, TimestampType
+    from pyspark.sql.types import StructType, StructField, StringType, DateType, TimestampType, DoubleType
     from delta.tables import DeltaTable
     HAS_PYSPARK = True
 except ImportError:
@@ -85,11 +106,13 @@ except ImportError:
 
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Part 1: Phase 1 Offline Logic Unit Tests
 # MAGIC Validates predicate building, date scope derivation, SQL three-valued logic traps, and IngestionManifest safety contracts without requiring a live Spark cluster.
 
 # COMMAND ----------
+
 class TestPhase1OfflineLogic(unittest.TestCase):
     """
     Offline unit tests validating predicate building, date scope derivation,
@@ -397,17 +420,87 @@ class TestPhase1OfflineLogic(unittest.TestCase):
 
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Part 2: Live Spark & Delta Lake Integration Tests
 # MAGIC Validates partition isolation, historical date preservation, merge idempotency, schema enforcement, and quarantine gates against live Delta Lake storage.
 
 # COMMAND ----------
+
 @unittest.skipUnless(HAS_PYSPARK, "PySpark & Delta Lake not available in current Python environment")
 class TestPhase1SparkIntegration(unittest.TestCase):
     """
     Live Spark + Delta Lake integration tests running against temporary local storage
     or Databricks Community Edition / Serverless cluster.
     """
+
+    # Explicit schemas required on Spark Connect (Serverless) — type inference from
+    # Row objects is not supported.
+    _SAMPLE_SCHEMA = StructType([
+        StructField("report_id", StringType(), True),
+        StructField("measurement_start_time", StringType(), True),
+        StructField("probe_cc", StringType(), True),
+        StructField("probe_asn", StringType(), True),
+        StructField("test_name", StringType(), True),
+        StructField("input", StringType(), True),
+        StructField("measurement_date", DateType(), True),
+        StructField("load_timestamp", TimestampType(), True),
+        StructField("_source_file", StringType(), True),
+        StructField("_batch_id", StringType(), True),
+        StructField("_corrupt_record", StringType(), True),
+        StructField("software_version", StringType(), True),
+        StructField("test_keys", StringType(), True),
+        StructField("measurement_uid", StringType(), True),
+        StructField("test_start_time", StringType(), True),
+        StructField("test_runtime", DoubleType(), True),
+        StructField("annotations", StringType(), True),
+        StructField("probe_ip", StringType(), True),
+        StructField("resolver_ip", StringType(), True),
+    ])
+
+    _CONFLICT_SCHEMA = StructType([
+        StructField("report_id", StringType(), True),
+        StructField("measurement_start_time", StringType(), True),
+        StructField("probe_cc", StringType(), True),
+        StructField("probe_asn", StringType(), True),
+        StructField("test_name", StringType(), True),
+        StructField("input", StringType(), True),
+        StructField("measurement_date", DateType(), True),
+        StructField("test_start_time", StringType(), True),
+        StructField("load_timestamp", TimestampType(), True),
+        StructField("_source_file", StringType(), True),
+        StructField("_batch_id", StringType(), True),
+        StructField("_corrupt_record", StringType(), True),
+        StructField("software_version", StringType(), True),
+        StructField("test_keys", StringType(), True),
+        StructField("measurement_uid", StringType(), True),
+        StructField("test_runtime", DoubleType(), True),
+        StructField("annotations", StringType(), True),
+        StructField("probe_ip", StringType(), True),
+        StructField("resolver_ip", StringType(), True),
+    ])
+
+    _TIE_SCHEMA = StructType([
+        StructField("report_id", StringType(), True),
+        StructField("measurement_start_time", StringType(), True),
+        StructField("test_start_time", StringType(), True),
+        StructField("probe_cc", StringType(), True),
+        StructField("probe_asn", StringType(), True),
+        StructField("test_name", StringType(), True),
+        StructField("input", StringType(), True),
+        StructField("measurement_date", DateType(), True),
+        StructField("load_timestamp", TimestampType(), True),
+        StructField("_source_file", StringType(), True),
+        StructField("_batch_id", StringType(), True),
+        StructField("_corrupt_record", StringType(), True),
+        StructField("software_version", StringType(), True),
+        StructField("test_keys", StringType(), True),
+        StructField("measurement_uid", StringType(), True),
+        StructField("test_runtime", DoubleType(), True),
+        StructField("annotations", StringType(), True),
+        StructField("probe_ip", StringType(), True),
+        StructField("resolver_ip", StringType(), True),
+    ])
 
     @classmethod
     def setUpClass(cls):
@@ -430,7 +523,14 @@ class TestPhase1SparkIntegration(unittest.TestCase):
             )
             cls._stopped_spark_needed = True
 
-        cls.test_dir = tempfile.mkdtemp(prefix="panopticon_test_bronze_")
+        # On Serverless, /tmp (DBFS) is disabled — use UC volume for test directories
+        _is_serverless = os.environ.get("IS_SERVERLESS", "").upper() == "TRUE"
+        if _is_serverless:
+            _vol_base = "/Volumes/workspace/default/panopticon"
+            os.makedirs(_vol_base, exist_ok=True)
+            cls.test_dir = tempfile.mkdtemp(prefix="test_bronze_", dir=_vol_base)
+        else:
+            cls.test_dir = tempfile.mkdtemp(prefix="panopticon_test_bronze_")
 
     @classmethod
     def tearDownClass(cls):
@@ -458,11 +558,17 @@ class TestPhase1SparkIntegration(unittest.TestCase):
                 _batch_id=batch_id,
                 _corrupt_record=None,
                 software_version=version,
-                test_keys='{"blocking": false}'
+                test_keys='{"blocking": false}',
+                measurement_uid=None,
+                test_start_time=None,
+                test_runtime=None,
+                annotations=None,
+                probe_ip=None,
+                resolver_ip=None
             )
             for i in range(count)
         ]
-        return self.spark.createDataFrame(rows)
+        return self.spark.createDataFrame(rows, schema=self._SAMPLE_SCHEMA)
 
     def test_01_cross_country_partition_isolation(self):
         """P0: Ingesting PK records on date T MUST NEVER delete existing IR or RU records for date T."""
@@ -582,7 +688,9 @@ class TestPhase1SparkIntegration(unittest.TestCase):
             measurement_date=date(2026, 9, 27), test_start_time="2026-09-27 11:59:00",
             load_timestamp=datetime(2026, 9, 27, 12, 0, 0),
             _source_file="file1.json", _batch_id="BATCH_1", _corrupt_record=None,
-            software_version="6.2.0", test_keys='{"status": "old"}'
+            software_version="6.2.0", test_keys='{"status": "old"}',
+            measurement_uid=None, test_runtime=None, annotations=None,
+            probe_ip=None, resolver_ip=None
         )
         row_newer = Row(
             report_id="rep_PK_conflict", measurement_start_time="2026-09-27 12:00:00",
@@ -591,9 +699,11 @@ class TestPhase1SparkIntegration(unittest.TestCase):
             load_timestamp=datetime(2026, 9, 27, 12, 5, 0),
             _source_file="file2.json", _batch_id="BATCH_2", _corrupt_record=None,
             software_version="6.3.0",
-            test_keys='{"status": "new_corrected"}'
+            test_keys='{"status": "new_corrected"}',
+            measurement_uid=None, test_runtime=None, annotations=None,
+            probe_ip=None, resolver_ip=None
         )
-        df_conflict = self.spark.createDataFrame([row_older, row_newer])
+        df_conflict = self.spark.createDataFrame([row_older, row_newer], schema=self._CONFLICT_SCHEMA)
 
         # Write must succeed deterministically without Delta AnalysisException
         bronze_mod.write_bronze_delta_table(self.spark, df_conflict, "2026-09-27", "PK", "incremental", bronze_path=table_path)
@@ -610,9 +720,11 @@ class TestPhase1SparkIntegration(unittest.TestCase):
             report_id="rep_null_cc", measurement_start_time="2026-09-27 10:00:00",
             probe_cc=None, probe_asn="AS9541", test_name="web_connectivity", input="https://example.com",
             measurement_date=date(2026, 9, 27), load_timestamp=datetime.now(), _source_file="null_cc.json",
-            _batch_id="BATCH_NULL_CC", _corrupt_record=None, software_version="6.2.0", test_keys='{}'
+            _batch_id="BATCH_NULL_CC", _corrupt_record=None, software_version="6.2.0", test_keys='{}',
+            measurement_uid=None, test_start_time=None, test_runtime=None,
+            annotations=None, probe_ip=None, resolver_ip=None
         )
-        df_null_cc = self.spark.createDataFrame([row])
+        df_null_cc = self.spark.createDataFrame([row], schema=self._SAMPLE_SCHEMA)
         with self.assertRaises(ValueError) as ctx:
             bronze_mod.write_bronze_delta_table(self.spark, df_null_cc, "2026-09-27", "PK", "incremental", bronze_path=table_path)
         self.assertIn("null or mismatched probe_cc", str(ctx.exception))
@@ -624,9 +736,11 @@ class TestPhase1SparkIntegration(unittest.TestCase):
             report_id="rep_null_date", measurement_start_time="2026-09-27 10:00:00",
             probe_cc="PK", probe_asn="AS9541", test_name="web_connectivity", input="https://example.com",
             measurement_date=None, load_timestamp=datetime.now(), _source_file="null_date.json",
-            _batch_id="BATCH_NULL_DATE", _corrupt_record=None, software_version="6.2.0", test_keys='{}'
+            _batch_id="BATCH_NULL_DATE", _corrupt_record=None, software_version="6.2.0", test_keys='{}',
+            measurement_uid=None, test_start_time=None, test_runtime=None,
+            annotations=None, probe_ip=None, resolver_ip=None
         )
-        df_null_date = self.spark.createDataFrame([row])
+        df_null_date = self.spark.createDataFrame([row], schema=self._SAMPLE_SCHEMA)
         with self.assertRaises(ValueError) as ctx:
             bronze_mod.write_bronze_delta_table(self.spark, df_null_date, "2026-09-27", "PK", "incremental", bronze_path=table_path)
         self.assertIn("null measurement_date", str(ctx.exception))
@@ -779,17 +893,21 @@ class TestPhase1SparkIntegration(unittest.TestCase):
             probe_cc="PK", probe_asn="AS9541", test_name="web_connectivity", input="https://example.com",
             measurement_date=date(2026, 9, 27), load_timestamp=datetime(2026, 9, 27, 10, 0, 0),
             _source_file="same_file.json", _batch_id="BATCH_TIE", _corrupt_record=None,
-            software_version="6.2.0", test_keys='{"blocking": false, "variant": "A"}'
+            software_version="6.2.0", test_keys='{"blocking": false, "variant": "A"}',
+            measurement_uid=None, test_runtime=None, annotations=None,
+            probe_ip=None, resolver_ip=None
         )
         row_b = Row(
             report_id="rep_tie", measurement_start_time=fixed_time, test_start_time=fixed_time,
             probe_cc="PK", probe_asn="AS9541", test_name="web_connectivity", input="https://example.com",
             measurement_date=date(2026, 9, 27), load_timestamp=datetime(2026, 9, 27, 10, 0, 0),
             _source_file="same_file.json", _batch_id="BATCH_TIE", _corrupt_record=None,
-            software_version="6.2.0", test_keys='{"blocking": true, "variant": "B"}'
+            software_version="6.2.0", test_keys='{"blocking": true, "variant": "B"}',
+            measurement_uid=None, test_runtime=None, annotations=None,
+            probe_ip=None, resolver_ip=None
         )
 
-        df_ties = self.spark.createDataFrame([row_a, row_b])
+        df_ties = self.spark.createDataFrame([row_a, row_b], schema=self._TIE_SCHEMA)
         # Write must succeed deterministically without non-deterministic crash
         bronze_mod.write_bronze_delta_table(self.spark, df_ties, "2026-09-27", "PK", "incremental", bronze_path=table_path)
 
@@ -798,11 +916,13 @@ class TestPhase1SparkIntegration(unittest.TestCase):
 
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Part 3: Test Runner Execution
 # MAGIC Execute the cell below to run the complete 27-test validation suite directly in Databricks.
 
 # COMMAND ----------
+
 def run_all_tests():
     """
     Executes all 27 unit and Delta Lake integration tests safely inside Databricks.
@@ -821,6 +941,7 @@ def run_all_tests():
     return result
 
 # COMMAND ----------
+
 # Trigger test execution in Databricks or standalone CLI
 if __name__ == "__main__" and "DATABRICKS_RUNTIME_VERSION" not in os.environ:
     unittest.main(verbosity=2)
