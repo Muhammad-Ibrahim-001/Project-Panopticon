@@ -231,6 +231,7 @@ sequenceDiagram
 MERGE INTO silver_network_measurements AS target
 USING staged_silver_batch AS source
 ON target.measurement_id = source.measurement_id
+   AND target.measurement_date = source.measurement_date -- Enforces Delta partition pruning (SILVER-21)
 WHEN MATCHED AND (
     NOT (target.content_category <=> source.content_category) OR
     NOT (target.tampering_vector <=> source.tampering_vector) OR
@@ -238,7 +239,8 @@ WHEN MATCHED AND (
     NOT (target.dns_anomaly_flag <=> source.dns_anomaly_flag) OR
     NOT (target.tcp_anomaly_flag <=> source.tcp_anomaly_flag) OR
     NOT (target.tls_anomaly_flag <=> source.tls_anomaly_flag) OR
-    NOT (target.http_anomaly_flag <=> source.http_anomaly_flag)
+    NOT (target.http_anomaly_flag <=> source.http_anomaly_flag) OR
+    NOT (target.taxonomy_version <=> source.taxonomy_version)
 ) THEN
   UPDATE SET
     target.event_timestamp = source.event_timestamp,
@@ -251,6 +253,8 @@ WHEN MATCHED AND (
     target.content_category = source.content_category,
     target.category_description = source.category_description,
     target.human_rights_risk_tier = source.human_rights_risk_tier,
+    target.category_match_type = source.category_match_type,
+    target.taxonomy_version = source.taxonomy_version,
     target.load_timestamp = current_timestamp(),
     target._batch_id = source._batch_id
 WHEN NOT MATCHED THEN

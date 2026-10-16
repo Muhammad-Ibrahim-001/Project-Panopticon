@@ -50,18 +50,18 @@ To ensure balanced accountability and maximum learning across distributed system
   * Implement `02_silver_cleaning_anonymization.py`.
   * Hash resolver IPs using `sha2(concat(resolver_ip, salt), 256)` and truncate client subnets.
   * Sanitize target URL query parameters using PySpark regex functions.
-* **Sprint 2.3: Exploding & Relational Flattening**:
-  * Unpack nested arrays: `test_keys.queries`, `test_keys.tcp_connect`, and `test_keys.network_events`.
-  * Classify tampering attacks into clean labels (`DNS_TAMPERING`, `TCP_RST_INJECTION`, `TLS_DROP`, `HTTP_BLOCK`).
+* **Sprint 2.3: Child Protocol Normalization & Tampering Classification**:
+  * Normalize nested arrays into dedicated child protocol tables (`silver_dns_experiments`, `silver_tcp_experiments`) using `explode_outer()`, maintaining a strict 1:1 measurement event grain (SILVER-12, SILVER-13).
+  * Classify tampering attacks into clean labels (`DNS_TAMPERING`, `TCP_RESET`, `TLS_DROP`, `HTTP_BLOCK`, `BENIGN`) using a multi-signal heuristic engine (SILVER-06).
 * **Sprint 2.4: Reference Joins & Incremental Rolling Lookback CDC Engine**:
-  * Broadcast join with Citizen Lab URL categories and ASN lookup tables.
-  * Implement Delta Lake `MERGE INTO` with a 3-day rolling lookback window ($T-3$ to $T$) to reconcile late-arriving mobile probe measurements and update enriched taxonomy idempotently.
+  * Broadcast join with Citizen Lab URL categories using a 2-tier match (exact URL + domain fallback) and pinned taxonomy versioning (SILVER-42, SILVER-44).
+  * Implement Delta Lake `MERGE INTO` with a 3-day rolling lookback window ($T-3$ to $T$) to reconcile late-arriving mobile probe measurements without write amplification (SILVER-20, SILVER-21).
   * Phase 2 Deliverable: Working Databricks notebook with reproducible Bronze and Silver pipeline runs.
 
 ### Phase 3: Gold Layer Modeling, BI Dashboards & Final Defense (Due: 24 Oct 2026)
 * **Sprint 3.1: Gold Star Schema & Analytical Marts**:
   * Implement `03_gold_dimensional_modeling.py`.
-  * Populate `fact_network_anomaly` and dimension tables (`dim_country_region`, `dim_isp_telecom`, `dim_content_category`, `dim_date_time`).
+  * Populate `fact_network_measurement` (complete 1:1 grain including normal and anomalous tests to preserve the CAI denominator — SILVER-39) and dimension tables (`dim_country_region`, `dim_isp_telecom`, `dim_content_category`, `dim_date_time`).
   * Precompute `agg_daily_censorship_severity` calculating the Censorship Aggression Index (CAI).
 * **Sprint 3.2: Advanced Analytical Measures**:
   * Implement the 5 complex business logic queries (Regulatory Enforcement Latency, Collateral Damage Ratio, Evasion Feasibility Matrix, Rolling Z-score Blackout Predictor).

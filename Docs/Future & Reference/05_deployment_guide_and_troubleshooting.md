@@ -18,7 +18,7 @@ This guide provides the exact step-by-step instructions to deploy, configure, an
    * **Instance**: 15 GB Memory, 2 Cores.
 3. In **Advanced Options** -> **Spark Config**, paste these memory safeguards:
    ```properties
-   spark.sql.shuffle.partitions 16
+   spark.sql.shuffle.partitions 4
    spark.databricks.delta.optimizeWrite.enabled true
    spark.databricks.delta.autoCompact.enabled true
    ```
@@ -78,7 +78,7 @@ Import the notebooks from the repository into your Databricks workspace:
 * **Fix**:
   * Run the `OPTIMIZE` command with `Z-ORDER BY` on the Gold tables before connecting Power BI:
     ```sql
-    OPTIMIZE fact_network_anomaly ZORDER BY (country_code, date_key, asn_id);
+    OPTIMIZE fact_network_measurement ZORDER BY (country_code, date_key, asn_id);
     ```
 
 ### Failure Mode 5: Delta MERGE Redundancy (`rows_updated = 0`) on Immutable Telemetry
@@ -138,6 +138,25 @@ Import the notebooks from the repository into your Databricks workspace:
 * **Root Cause**: Manifest validation logic placed inside `if table_exists:` blocks was skipped when `bronze_ooni_raw` had not yet been created.
 * **Fix**:
   * Hoist manifest existence, hash verification, and date scope validation to execute **before** the table existence check.
+
+### Failure Mode 12: `DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE` (Silver Grain Conflict)
+* **Symptoms**: Silver Delta MERGE crashes with `DeltaUnsupportedOperationException: Cannot perform Merge as multiple source rows matched and attempted to modify the same target row in the Delta table in possibly conflicting ways`.
+* **Root Cause**: Exploding multi-valued arrays (`queries`, `tcp_connect`) directly inside the DataFrame destined for `silver_network_measurements` produces multiple rows sharing the same `measurement_id`, violating Delta Lake's target uniqueness invariant during `MERGE INTO`.
+* **Fix**:
+  * Enforce a **strictly 1:1 measurement event grain** on `silver_network_measurements`. Never explode arrays into the parent conformed table.
+  * Normalize arrays into dedicated child tables (`silver_dns_experiments`, `silver_tcp_experiments`) via direct 1-pass `explode_outer()` projections.
+
+### Failure Mode 13: Polymorphic HTTP Response Body Deserialization Corruption (SILVER-11)
+* **Symptoms**: Spark's `from_json()` returns all `NULL` for the HTTP response struct, nullifying network measurements on confirmed blockpages.
+* **Root Cause**: Per OONI `df-001-httpt`, binary or compressed HTTP response bodies are serialized as JSON objects `{"data": "<base64>", "format": "base64"}`. Defining `body` as `StringType` inside a static `StructType` creates a polymorphic union-type conflict under Spark `from_json()`.
+* **Fix**:
+  * Omit raw HTTP `body` from the Silver schema entirely. Only parse status codes, headers, and failure strings.
+
+### Failure Mode 14: Corrupted Timestamp Silent Fallback & Temporal Partition Bleed (SILVER-37)
+* **Symptoms**: Invalid or garbage probe timestamps silently pass validation and land under the execution `batch_date` partition instead of being flagged as corrupt.
+* **Root Cause**: Including a fallback expression `to_date(lit(batch_date))` inside the timestamp coalesce chain masks invalid dates, bypassing pre-write null checks.
+* **Fix**:
+  * Remove `batch_date` from the coalesce chain. If timestamp parsing fails, `measurement_date` evaluates to `NULL` and routes to `quarantine_ooni_raw` with `rejection_reason = 'INVALID_MEASUREMENT_TIMESTAMP'`.
 
 ---
 

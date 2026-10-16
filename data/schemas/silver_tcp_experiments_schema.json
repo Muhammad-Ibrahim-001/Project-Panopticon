@@ -1,0 +1,91 @@
+{
+  "title": "Panopticon Silver TCP Experiments Child Table Schema",
+  "description": "Normalized, exploded TCP connection-level telemetry contract for silver_tcp_experiments",
+  "type": "struct",
+  "fields": [
+    {
+      "name": "tcp_experiment_id",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Primary Key: SHA256 deterministic hash of measurement_id, connect_index via posexplode_outer" }
+    },
+    {
+      "name": "measurement_id",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Foreign Key referencing silver_network_measurements.measurement_id" }
+    },
+    {
+      "name": "measurement_date",
+      "type": "date",
+      "nullable": false,
+      "metadata": { "comment": "Physical partition column (YYYY-MM-DD)" }
+    },
+    {
+      "name": "event_timestamp",
+      "type": "timestamp",
+      "nullable": false,
+      "metadata": { "comment": "Standardized UTC timestamp of measurement start" }
+    },
+    {
+      "name": "probe_cc",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "ISO 3166-1 alpha-2 country code" }
+    },
+    {
+      "name": "probe_asn",
+      "type": "long",
+      "nullable": true,
+      "metadata": { "comment": "Autonomous System Number of tester network" }
+    },
+    {
+      "name": "destination_ip",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Remote target endpoint IP" }
+    },
+    {
+      "name": "destination_port",
+      "type": "integer",
+      "nullable": false,
+      "metadata": { "comment": "Target TCP port (80, 443, etc.)" }
+    },
+    {
+      "name": "connect_success",
+      "type": "boolean",
+      "nullable": false,
+      "metadata": { "comment": "True if TCP three-way handshake completed successfully (status.success)" }
+    },
+    {
+      "name": "connect_blocked",
+      "type": "boolean",
+      "nullable": false,
+      "metadata": { "comment": "True if TCP connection was explicitly blocked or reset (status.blocked)" }
+    },
+    {
+      "name": "connect_failure",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "TCP error message (connection_refused, connection_reset, tcp_timed_out)" }
+    },
+    {
+      "name": "is_tcp_blocked",
+      "type": "boolean",
+      "nullable": false,
+      "metadata": { "comment": "True if connect_blocked == true or connect_failure == 'connection_reset_by_peer'" }
+    },
+    {
+      "name": "load_timestamp",
+      "type": "timestamp",
+      "nullable": false,
+      "metadata": { "comment": "Audit: UTC timestamp of ingestion into Silver (Course Requirement P2-2d)" }
+    },
+    {
+      "name": "_batch_id",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Audit: Processing batch identifier" }
+    }
+  ]
+}

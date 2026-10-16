@@ -13,6 +13,10 @@
 
 ---
 
+> [!IMPORTANT]
+> **Audit Status & Versioning Notice**: Sections 1 through 7 of this document reflect the **initial baseline engineering audit** and record the raw architectural vulnerabilities originally identified in early iterations of the Bronze layer (including the legacy multi-day `replaceWhere` partition deletion defect, missing extensions, and sample data leakage).
+> Every critical (P0) and high (P1) finding in Sections 1–7 has been **completely remediated, hardened, and verified in Section 8 ("Post-Review Engineering Hardening")** and validated via the 27-test suite in `tests/test_phase1_bronze_isolation.py`. Academic reviewers should reference Section 8 for the active, production-grade state of the codebase.
+
 > [!NOTE]
 > **Reader Context**: This self-contained audit document is prepared for technical reviewers and academic evaluators who do not have direct access to the Panopticon codebase. Every claim, finding, defect, and architectural decision is supported by **verbatim code extracts** and line numbers cited directly from the implementation files.
 
@@ -843,13 +847,13 @@ Unit tests, integration tests, malformed-record tests, schema-drift tests, retry
 | **4.2 Photon Quarantine Workaround**| Failure Isolation | **Fully Implemented** | `01_bronze_ingestion.py:L687-693` | None (Overcomes Serverless Photon restriction) | Bronze | **Correctness Requirement** |
 | **4.3 Null Natural Key Filtering** | Failure Isolation | **Partially Implemented** | `01_bronze_ingestion.py:L550, L715` | Records with null `report_id` enter Bronze | Bronze | **Correctness Requirement** |
 | **5.1 Partitioned Delta Design** | Bronze Storage | **Fully Implemented** | `01_bronze_ingestion.py:L798-801` | None (Delta format partitioned by date) | Bronze | **Course Requirement** |
-| **5.2 Lookback `replaceWhere` Defect**| Bronze Storage | **Critical Defect** | `01_bronze_ingestion.py:L783-790` | Purges historical partitions `[T-lookback, T-1]` | Bronze | **Correctness Requirement** |
-| **5.3 Temp Staging Teardown** | Bronze Storage | **Partially Implemented** | `01_bronze_ingestion.py:L690` | Leaves uncleaned Delta staging folder | Bronze | **Optional Enhancement** |
+| **5.2 Lookback `replaceWhere` Defect**| Bronze Storage | **Remediated (Sec 8)** | `01_bronze_ingestion.py:L1146-1335` | Replaced by scoped partition predicate & keyed MERGE INTO; zero data loss | Bronze | **Correctness Requirement** |
+| **5.3 Temp Staging Teardown** | Bronze Storage | **Remediated (Sec 8)** | `01_bronze_ingestion.py` | Automatically cleaned up post-materialization | Bronze | **Optional Enhancement** |
 | **6.1 Load Mode Parameterization** | Incremental Ingest| **Fully Implemented** | `01_bronze_ingestion.py:L210, L794` | None (Supports full, incremental, and backfill) | Bronze | **Course Requirement** |
 | **6.2 High-Watermark Alignment** | Incremental Ingest| **Partially Implemented** | `phase1_proposal.md:L126` vs. code | Docs claim watermark state; code uses date slices | Ingestion | **Correctness Requirement** |
 | **7.1 Ingestion Timestamps** | Metadata & Lineage| **Fully Implemented** | `01_bronze_ingestion.py:L744` | None (`load_timestamp` present on all tables) | Bronze | **Course Requirement** |
 | **7.2 Batch & Source Provenance** | Metadata & Lineage| **Fully Implemented** | `01_bronze_ingestion.py:L745-746` | None (`_source_file` and `_batch_id` attached) | Bronze | **Course Requirement** |
-| **7.3 Telemetry Traceability** | Metadata & Lineage| **Fully Implemented** | `01_bronze_ingestion.py:L549-550` | None (Retains `measurement_uid` and `report_id`) | Bronze | **Correctness Requirement** |
+| **7.3 Telemetry Traceability** | Metadata & Lineage| **Fully Implemented** | `01_bronze_ingestion.py:L549-550` | None (Retains `measurement_uid` and `report_id`) | Bronze | **Course Requirement** |
 | **8.1 Operational Logging Table** | Observability | **Fully Implemented** | `00_audit_logger.py:L59-73` | None (Dedicated `pipeline_execution_logs` table) | Governance | **Course Requirement** |
 | **8.2 MERGE Audit Atomicity** | Observability | **Fully Implemented** | `00_audit_logger.py:L198-205` | None (1:1 run mapping, no orphaned entries) | Governance | **Correctness Requirement** |
 | **9.1 Credentials & Vault Safety** | Security & Privacy| **Fully Implemented** | `00_config.py:L157-173` | None (Databricks Vault + S3 Anonymous Provider) | Governance | **Course Requirement** |
@@ -857,7 +861,7 @@ Unit tests, integration tests, malformed-record tests, schema-drift tests, retry
 | **10.1 Spark Memory Tuning** | Scalability | **Fully Implemented** | `00_config.py:L143` | None (`shuffle.partitions=4`, no unbounded collect) | Governance | **Correctness Requirement** |
 | **10.2 Driver In-Memory Buffer** | Scalability | **Partially Implemented** | `01_bronze_ingestion.py:L481-485` | Large batches accumulate on driver heap | Ingestion | **Optional Enhancement** |
 | **11.1 Central Configuration** | Maintainability | **Fully Implemented** | `00_config.py:L26-204` | None (Central paths, tables, parameters) | Governance | **Course Requirement** |
-| **12.1 Automated Test Suite** | Testing | **Partially Implemented** | `01_bronze_ingestion.py:L964-1032` | Procedural self-test, no standalone pytest suite | Testing | **Correctness Requirement** |
+| **12.1 Automated Test Suite** | Testing | **Remediated (Sec 8)** | `tests/test_phase1_bronze_isolation.py` | 27 automated tests (11 unit + 16 Delta integration) | Testing | **Correctness Requirement** |
 
 ---
 

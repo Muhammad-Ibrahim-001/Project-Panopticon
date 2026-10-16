@@ -673,7 +673,7 @@ flowchart TD
 Gold builds the dimensional Star Schema and precalculated analytical rollups:
 
 1. **Star Schema Model**:
-   - **Fact Table**: `fact_network_anomaly` (Granularity: 1 row per measurement event with foreign keys `date_id`, `country_id`, `isp_id`, `category_id`, metrics: `duration_seconds`, `is_anomaly`, `dns_flag`, `tcp_flag`, `tls_flag`, `http_flag`).
+   - **Fact Table**: `fact_network_measurement` (Granularity: 1 row per measurement event preserving both normal and anomalous probes for accurate denominator calculations; foreign keys `date_id`, `country_id`, `isp_id`, `category_id`, metrics: `test_runtime_seconds`, `is_anomaly`, `dns_anomaly_flag`, `tcp_anomaly_flag`, `tls_anomaly_flag`, `http_anomaly_flag`).
    - **Dimensions**:
      - `dim_date`: Calendar date hierarchy (year, quarter, month, day, day_of_week).
      - `dim_country`: ISO-3166 code, country name, surveillance risk level.

@@ -12,7 +12,7 @@ This document outlines the **8 core engineering features** you will build, accom
 
 ## 1. Semi-Structured JSON Parsing & Polymorphic Schema Enforcement
 * **The Problem**: Raw OONI network logs are deeply nested JSONL files. Different tests (`web_connectivity`, `whatsapp`, `dnscheck`) have different structures inside `test_keys`. Naive schema inference (`inferSchema=True`) will trigger a full file scan, exhaust cluster memory, or produce corrupted columns.
-* **The Core DE Feature**: Two-tier schema enforcement: storing polymorphic `test_keys` as raw `StringType` at Bronze, and applying test-specific `StructType` schemas via `from_json()` at Silver.
+* **The Core DE Feature**: Two-tier schema enforcement: storing polymorphic `test_keys` as raw `StringType` at Bronze, and applying test-specific `StructType` schemas via `from_json()` at Silver without risking union-type crashes or driver OOM.
 * **PySpark Code Pattern**:
 ```python
 from pyspark.sql.types import StructType, StructField, StringType, BooleanType, ArrayType, DoubleType, LongType
@@ -20,6 +20,7 @@ from pyspark.sql.functions import col, from_json
 
 # 1. Bronze: Strict Schema-on-Read stores polymorphic test_keys as raw StringType
 base_schema = StructType([
+    StructField("measurement_uid", StringType(), True),  # Global UUID from API index (SILVER-04)
     StructField("report_id", StringType(), False),
     StructField("input", StringType(), True),
     StructField("test_name", StringType(), False),
@@ -28,7 +29,10 @@ base_schema = StructType([
     StructField("probe_cc", StringType(), False),
     StructField("resolver_ip", StringType(), True),
     StructField("test_runtime", DoubleType(), True),
-    StructField("test_keys", StringType(), True),  # Raw JSON string prevents union-type crashes
+    StructField("extensions", StringType(), True),        # Preserved protocol extensions (SILVER-05)
+    StructField("api_anomaly", BooleanType(), True),      # Upstream ground truth (SILVER-41)
+    StructField("api_confirmed", BooleanType(), True),
+    StructField("test_keys", StringType(), True),         # Raw JSON string prevents union-type crashes
     StructField("_corrupt_record", StringType(), True)
 ])
 
@@ -36,21 +40,21 @@ base_schema = StructType([
 df_bronze = spark.read.schema(base_schema).option("mode", "PERMISSIVE").json("s3a://ooni-data-eu-fra/raw/20260920/*/*/*/*.jsonl.gz")
 
 # 2. Silver: Test-specific schema applied via from_json() per test_name
+# Raw response body is omitted to avoid union-type string|object crashes (SILVER-11)
 web_test_keys_schema = StructType([
-    StructField("blocking", StringType(), True),  # Normalized string handling boolean/string union
+    StructField("blocking", StringType(), True),
+    StructField("accessible", BooleanType(), True),
     StructField("dns_experiment_failure", StringType(), True),
     StructField("http_experiment_failure", StringType(), True),
-    StructField("control_failure", StringType(), True),
-    StructField("queries", ArrayType(
+    StructField("tcp_connect", ArrayType(
         StructType([
-            StructField("query_type", StringType(), True),
-            StructField("failure", StringType(), True),
-            StructField("answers", ArrayType(
-                StructType([
-                    StructField("answer_type", StringType(), True),
-                    StructField("ipv4", StringType(), True)
-                ])
-            ), True)
+            StructField("ip", StringType(), True),
+            StructField("port", LongType(), True),
+            StructField("status", StructType([
+                StructField("blocked", BooleanType(), True),  # OONI confirmed blocking signal (SILVER-09)
+                StructField("failure", StringType(), True),
+                StructField("success", BooleanType(), True)
+            ]), True)
         ])
     ), True)
 ])
@@ -62,83 +66,86 @@ df_parsed = df_bronze.filter(col("test_name") == "web_connectivity").withColumn(
 
 ---
 
-## 2. Array Exploding & Relational Flattening
-* **The Problem**: A single measurement contains multiple DNS queries and TCP handshake attempts stored as nested JSON arrays. Analysts cannot run SQL `GROUP BY` or calculate latency across arrays.
-* **The Core DE Feature**: Normalizing multi-valued nested structures into atomic relational records using `explode()`.
+## 2. Normalized Protocol Child Table Projection (Cartesian Guard)
+* **The Problem**: Chaining multiple `explode()` operations on a single DataFrame (`queries` $\times$ `tcp_connect` $\times$ `network_events`) creates an intra-row Cartesian cross-product ($36 \times 34 \times 379 = 463,896$ rows per record), ballooning 50K records into 60M+ rows and triggering driver heap exhaustion on Databricks Community Edition (SILVER-13). Furthermore, standard `explode()` silently deletes 100% of DNS-censored records because downstream arrays are empty (SILVER-14).
+* **The Core DE Feature**: Projecting arrays into isolated child tables using `explode_outer()` while preserving a strict 1:1 grain on the primary measurement table.
 * **PySpark Code Pattern**:
 ```python
-from pyspark.sql.functions import col, explode
+from pyspark.sql.functions import col, posexplode_outer, sha2, concat_ws, lit
 
-# Explode nested DNS queries to measure individual resolver performance
-df_exploded_dns = df_bronze.select(
-    col("measurement_uid"),
-    col("probe_asn"),
-    col("input").alias("target_url"),
-    explode(col("test_keys.queries")).alias("dns_query")
-).select(
-    col("measurement_uid"),
-    col("probe_asn"),
-    col("target_url"),
-    col("dns_query.query_type"),
-    col("dns_query.failure").alias("dns_failure")
+# Isolated child table projection: deterministic keying using array position (SILVER-12, SILVER-13, SILVER-52)
+# posexplode_outer() preserves array order and generates deterministic keys across task re-execution
+df_dns_experiments = df_parsed.select(
+    col("measurement_id"),
+    col("measurement_date"),
+    posexplode_outer(col("parsed_keys.queries")).alias("query_pos", "query")
+).filter(col("query").isNotNull()).select(
+    sha2(concat_ws("||", col("measurement_id"), col("query_pos").cast("string")), 256).alias("dns_experiment_id"),
+    col("measurement_id"),
+    col("measurement_date"),
+    col("query.query_type"),
+    col("query.hostname").alias("query_hostname"),
+    col("query.failure").alias("dns_failure"),
+    col("query.answers")
 )
 ```
 
 ---
 
-## 3. Late Arrivals, Re-Enrichment & Idempotency via Delta Lake `MERGE INTO`
+## 3. Late Arrivals, Re-Enrichment & Zero-Write-Amplification Delta `MERGE INTO`
 * **The Problem**: Raw telemetry observations are immutable event logs—upstream OONI never alters a historical measurement. However:
-  1. *Late Arrivals*: Probes in censored regions frequently store test results offline and sync days later.
+  1. *Late Arrivals*: Probes in censored regimes frequently store test results offline and sync days later.
   2. *Dimensional Re-Enrichment*: As Citizen Lab updates domain categories or tampering classification heuristics improve, enriched columns in the Silver layer must be refreshed without re-ingesting raw files.
-  3. *Idempotent Retries*: Re-running a batch must never create duplicate records.
-* **The Core DE Feature**: Idempotent upserting using Delta Lake's ACID `MERGE INTO` scanning a 3-day rolling lookback window.
+  3. *Zero Write Amplification (SILVER-20)*: Including `_batch_id` in the `WHEN MATCHED` trigger causes 100% false updates on every run, forcing full Copy-on-Write partition rewrites.
+* **The Core DE Feature**: Idempotent upserting using Delta Lake's ACID `MERGE INTO` with partition pruning and NULL-safe `<=>` change detection.
 * **PySpark Code Pattern**:
 ```python
 from delta.tables import DeltaTable
 
 silver_delta = DeltaTable.forPath(spark, "/mnt/lakehouse/silver/network_measurements")
 
-# Upsert rolling 3-day window into Silver layer
+# Upsert rolling 3-day window into Silver layer with partition pruning
 silver_delta.alias("target").merge(
     source=df_staged_lookback_batch.alias("source"),
-    condition="target.measurement_id = source.measurement_id"
+    condition="target.measurement_id = source.measurement_id AND target.measurement_date = source.measurement_date"
 ).whenMatchedUpdate(
-    condition="target.content_category != source.content_category OR target.tampering_vector != source.tampering_vector OR target._batch_id != source._batch_id",
+    # NULL-safe equality operator <=> detects actual business content changes.
+    # Excludes _batch_id to prevent 100% false update write amplification (SILVER-20).
+    condition="""
+        NOT (target.content_category <=> source.content_category)
+        OR NOT (target.tampering_vector <=> source.tampering_vector)
+        OR NOT (target.is_anomaly <=> source.is_anomaly)
+    """,
     set={
         "content_category": "source.content_category",
         "category_description": "source.category_description",
         "human_rights_risk_tier": "source.human_rights_risk_tier",
         "tampering_vector": "source.tampering_vector",
+        "is_anomaly": "source.is_anomaly",
         "load_timestamp": "current_timestamp()",
         "_batch_id": "source._batch_id"
     }
-).whenNotMatchedInsertAll(
-).execute()
+).whenNotMatchedInsertAll().execute()
 ```
 
 ---
 
-## 4. Cryptographic PII Governance & Data Pseudonymization
-* **The Problem**: Probe telemetry exposes sensitive network metadata (`resolver_ip`, `probe_asn`, and URL session tokens) that could endanger volunteer activists under hostile regimes.
-* **The Core DE Feature**: Enforcing one-way cryptographic hashing (`HMAC-SHA256`) and subnet truncation before writing to Silver.
+## 4. Cryptographic PII Governance & Data Minimization
+* **The Problem**: Public OONI archives redact `probe_ip` to `127.0.0.1` (SILVER-02), but expose sensitive network metadata (`resolver_ip`, persistent `probe_id` hashes, and raw HTTP request headers inside nested `test_keys`) that could endanger volunteer activists under hostile regimes (SILVER-43).
+* **The Core DE Feature**: Enforcing one-way salted cryptographic hashing (`HMAC-SHA256`), dropping persistent installation IDs, and purging raw `test_keys` JSON strings from Silver for GDPR data minimization.
 * **PySpark Code Pattern**:
 ```python
-from pyspark.sql.functions import sha2, concat, lit, regexp_replace, split
+from pyspark.sql.functions import sha2, concat, lit, regexp_replace
 
 PEPPER_SALT = dbutils.secrets.get(scope="panopticon_vault", key="ip_salt")
 
 df_silver = df_bronze.withColumn(
-    # One-way salted cryptographic hash of resolver IP
+    # One-way salted cryptographic hash of public ISP resolver IP
     "hashed_resolver_ip", sha2(concat(col("resolver_ip"), lit(PEPPER_SALT)), 256)
 ).withColumn(
-    # Truncate IPv4 to /24 subnet for regional analytics without user tracking
-    "masked_probe_subnet", concat(split(col("probe_ip"), "\.")[0], lit("."),
-                                  split(col("probe_ip"), "\.")[1], lit("."),
-                                  split(col("probe_ip"), "\.")[2], lit(".0/24"))
-).withColumn(
-    # Strip sensitive authentication tokens from tested URLs
+    # Strip sensitive authentication tokens and session keys from tested URLs
     "target_url", regexp_replace(col("input"), "([?&](session_id|token|auth)=)[^&]+", "$1REDACTED")
-).drop("resolver_ip", "probe_ip")
+).drop("resolver_ip", "probe_ip", "probe_id", "test_keys")  # Drop PII & raw payloads (SILVER-43)
 ```
 
 ---

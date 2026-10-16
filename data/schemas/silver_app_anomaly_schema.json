@@ -1,0 +1,97 @@
+{
+  "title": "Panopticon Silver App Anomaly Experiments Child Table Schema",
+  "description": "Normalized non-web circumvention & messaging app probe experiment contract for silver_app_anomaly_measurements",
+  "type": "struct",
+  "fields": [
+    {
+      "name": "app_measurement_id",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Primary Key: SHA256 deterministic hash of measurement_id, test_name, coalesce(target_endpoint, 'DEFAULT')" }
+    },
+    {
+      "name": "measurement_id",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Foreign Key referencing silver_network_measurements.measurement_id" }
+    },
+    {
+      "name": "measurement_date",
+      "type": "date",
+      "nullable": false,
+      "metadata": { "comment": "Physical partition column (YYYY-MM-DD)" }
+    },
+    {
+      "name": "event_timestamp",
+      "type": "timestamp",
+      "nullable": false,
+      "metadata": { "comment": "Standardized UTC timestamp of measurement start" }
+    },
+    {
+      "name": "probe_cc",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "ISO 3166-1 alpha-2 country code" }
+    },
+    {
+      "name": "probe_asn",
+      "type": "long",
+      "nullable": true,
+      "metadata": { "comment": "Autonomous System Number of tester network" }
+    },
+    {
+      "name": "test_name",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "App protocol test (whatsapp, telegram, signal, tor, psiphon, echcheck)" }
+    },
+    {
+      "name": "target_endpoint",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Target bridge, relay, or bootstrap endpoint" }
+    },
+    {
+      "name": "target_type",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Target role (HTTP_REGISTRATION_SERVER, TCP_RELAY, BRIDGE, OR_PORT)" }
+    },
+    {
+      "name": "app_accessible",
+      "type": "boolean",
+      "nullable": true,
+      "metadata": { "comment": "App-specific accessibility verdict" }
+    },
+    {
+      "name": "app_tampering_vector",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Attack label: ENDPOINT_BLOCKED, BRIDGE_REACHABILITY_FAILURE, HANDSHAKE_RESET, BENIGN" }
+    },
+    {
+      "name": "is_anomaly",
+      "type": "boolean",
+      "nullable": false,
+      "metadata": { "comment": "Censorship anomaly flag derived from app-specific failure attributes" }
+    },
+    {
+      "name": "failure_detail",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Specific error extracted from app test keys (e.g. Signal failed_operation, Psiphon failure)" }
+    },
+    {
+      "name": "load_timestamp",
+      "type": "timestamp",
+      "nullable": false,
+      "metadata": { "comment": "Audit: UTC timestamp of ingestion into Silver (Course Requirement P2-2d)" }
+    },
+    {
+      "name": "_batch_id",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Audit: Processing batch identifier" }
+    }
+  ]
+}

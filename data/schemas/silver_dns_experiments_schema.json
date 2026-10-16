@@ -1,0 +1,121 @@
+{
+  "title": "Panopticon Silver DNS Experiments Child Table Schema",
+  "description": "Normalized, exploded DNS query and answer-level telemetry contract for silver_dns_experiments",
+  "type": "struct",
+  "fields": [
+    {
+      "name": "dns_experiment_id",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Primary Key: SHA256 deterministic hash of measurement_id, query_index, and answer_index via posexplode_outer" }
+    },
+    {
+      "name": "measurement_id",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Foreign Key referencing silver_network_measurements.measurement_id" }
+    },
+    {
+      "name": "measurement_date",
+      "type": "date",
+      "nullable": false,
+      "metadata": { "comment": "Physical partition column (YYYY-MM-DD)" }
+    },
+    {
+      "name": "event_timestamp",
+      "type": "timestamp",
+      "nullable": false,
+      "metadata": { "comment": "Standardized UTC timestamp of measurement start" }
+    },
+    {
+      "name": "probe_cc",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "ISO 3166-1 alpha-2 country code" }
+    },
+    {
+      "name": "probe_asn",
+      "type": "long",
+      "nullable": true,
+      "metadata": { "comment": "Autonomous System Number of tester network" }
+    },
+    {
+      "name": "query_name",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Queried FQDN hostname" }
+    },
+    {
+      "name": "query_type",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "DNS record query type (A, AAAA, CNAME, HTTPS)" }
+    },
+    {
+      "name": "hashed_resolver_ip",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Peppered SHA-256 pseudonymized resolver IP (raw resolver_address dropped for privacy)" }
+    },
+    {
+      "name": "answer_type",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "DNS answer record type (A, AAAA, CNAME, PTR)" }
+    },
+    {
+      "name": "answer_value",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Returned IP address or CNAME alias target in DNS answer section (supports non-IP answers)" }
+    },
+    {
+      "name": "answer_asn",
+      "type": "long",
+      "nullable": true,
+      "metadata": { "comment": "Autonomous system number of resolved answer IP" }
+    },
+    {
+      "name": "answer_as_org_name",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Commercial organization / ISP of resolved answer IP" }
+    },
+    {
+      "name": "dns_failure",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "DNS resolution error code (NXDOMAIN, SERVFAIL, timeout)" }
+    },
+    {
+      "name": "is_bogon",
+      "type": "boolean",
+      "nullable": false,
+      "metadata": { "comment": "True if answer IP is in RFC 1918 / 5735 / 6598 bogon ranges" }
+    },
+    {
+      "name": "is_nxdomain",
+      "type": "boolean",
+      "nullable": false,
+      "metadata": { "comment": "True if DNS server returned NXDOMAIN non-existent domain" }
+    },
+    {
+      "name": "dns_tampered",
+      "type": "boolean",
+      "nullable": false,
+      "metadata": { "comment": "True if DNS answer is spoofed or blocked" }
+    },
+    {
+      "name": "load_timestamp",
+      "type": "timestamp",
+      "nullable": false,
+      "metadata": { "comment": "Audit: UTC timestamp of ingestion into Silver (Course Requirement P2-2d)" }
+    },
+    {
+      "name": "_batch_id",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Audit: Processing batch identifier" }
+    }
+  ]
+}

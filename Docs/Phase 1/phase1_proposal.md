@@ -50,7 +50,7 @@ flowchart TB
     end
 
     subgraph GOLD ["Gold Layer: Analytical Star Schema & Business Marts"]
-        G_FACT[("fact_network_anomaly<br/>Granularity: 1 row per test failure")]
+        G_FACT[("fact_network_measurement<br/>Granularity: 1 row per normalized test measurement")]
         G_DIM1[("dim_country_region")]
         G_DIM2[("dim_isp_telecom")]
         G_DIM3[("dim_content_category")]
@@ -212,10 +212,10 @@ Raw Probe IP: 198.51.100.42  ──►  1. Subnet Truncation (Zero last octet): 
 
 ```mermaid
 erDiagram
-    DIM_COUNTRY_REGION ||--o{ FACT_NETWORK_ANOMALY : localizes
-    DIM_ISP_TELECOM ||--o{ FACT_NETWORK_ANOMALY : routes
-    DIM_CONTENT_CATEGORY ||--o{ FACT_NETWORK_ANOMALY : classifies
-    DIM_DATE_TIME ||--o{ FACT_NETWORK_ANOMALY : timestamps
+    DIM_COUNTRY_REGION ||--o{ FACT_NETWORK_MEASUREMENT : localizes
+    DIM_ISP_TELECOM ||--o{ FACT_NETWORK_MEASUREMENT : routes
+    DIM_CONTENT_CATEGORY ||--o{ FACT_NETWORK_MEASUREMENT : classifies
+    DIM_DATE_TIME ||--o{ FACT_NETWORK_MEASUREMENT : timestamps
 
     DIM_COUNTRY_REGION {
         string country_code PK
@@ -246,7 +246,7 @@ erDiagram
         boolean is_weekend
     }
 
-    FACT_NETWORK_ANOMALY {
+    FACT_NETWORK_MEASUREMENT {
         string measurement_id PK
         int date_key FK
         string country_code FK
@@ -258,7 +258,7 @@ erDiagram
         int tcp_anomaly_flag
         int tls_anomaly_flag
         int http_anomaly_flag
-        double response_latency_ms
+        double test_runtime_seconds
     }
 ```
 </details>
@@ -279,30 +279,31 @@ The Silver layer flattens, conforms, and enriches raw Bronze records. The target
 
 | Group | Key Columns | Source / Derivation |
 | :--- | :--- | :--- |
-| **Identity** | `measurement_id` (PK), `report_id`, `test_name` | `sha2(report_id \|\| coalesce(input, 'NO_INPUT') \|\| measurement_start_time)` |
+| **Identity** | `measurement_id` (PK), `measurement_uid`, `report_id`, `test_name` | `sha2(report_id \|\| coalesce(input, 'NO_INPUT') \|\| measurement_start_time \|\| coalesce(test_name, '') \|\| coalesce(probe_cc, '') \|\| coalesce(probe_asn, ''))` |
 | **Timing** | `event_timestamp` (TimestampType), `measurement_date` (DateType) | Cast from raw string with multi-format coalesce |
-| **Probe** | `probe_cc`, `probe_asn` (LongType), `probe_network_name` | Stripped `AS` prefix → numeric cast |
-| **PII-Masked** | `hashed_resolver_ip` (HMAC-SHA256), `masked_probe_subnet` (/24 truncation) | Applied at Silver boundary; raw IPs dropped |
-| **Target** | `target_url`, `target_domain` (bare domain, lowercased) | `regexp_extract` from `input` field |
-| **Enrichment** | `content_category`, `category_description`, `human_rights_risk_tier` | Broadcast join with Citizen Lab CSV on `target_domain` |
-| **Tampering** | `tampering_vector`, `is_anomaly` (BooleanType) | Derived from parsed `test_keys` per `test_name` |
+| **Probe** | `probe_cc`, `probe_asn` (LongType), `probe_network_name` | Stripped `AS` prefix → numeric cast with `0L` fallback |
+| **PII-Masked** | `hashed_resolver_ip` (HMAC-SHA256) | Applied at Silver boundary; client probe_id, loopback IP & test_keys dropped |
+| **Target** | `target_url`, `target_domain` (bare domain, lowercased) | Sanitized URL and `regexp_extract` domain from `input` |
+| **Enrichment** | `content_category`, `category_description`, `category_match_type`, `taxonomy_version`, `human_rights_risk_tier` | Two-tier broadcast join with Citizen Lab (Exact URL + bare domain fallback) |
+| **Tampering** | `tampering_vector`, `is_anomaly`, `classification_status` | Multi-signal classification (`DNS_TAMPERING`, `TCP_RESET`, `TLS_DROP`, `HTTP_BLOCK`, `BENIGN`, `UNKNOWN`) |
 | **Anomaly Flags** | `dns_anomaly_flag`, `tcp_anomaly_flag`, `tls_anomaly_flag`, `http_anomaly_flag` | Binary flags from test_keys failure fields |
-| **Audit** | `load_timestamp`, `_source_file`, `_batch_id` | Pipeline execution metadata |
+| **Performance** | `test_runtime_seconds` (DoubleType) | Execution duration in seconds |
+| **Audit** | `load_timestamp`, `_batch_id` | Pipeline execution metadata |
 
 * **Transformations Applied**:
   1. **Schema Standardization**: `measurement_start_time` → `TimestampType` using coalesce across multiple observed OONI timestamp formats (`yyyy-MM-dd HH:mm:ss`, `yyyy-MM-dd'T'HH:mm:ss`, ISO 8601 with offset).
-  2. **test_keys Parsing**: `test_keys` is stored as a raw JSON string at Bronze (see §5.1 for rationale). In Silver, it is parsed using `from_json()` with a `test_name`-specific schema, enabling correct handling of the polymorphic `blocking` field.
-  3. **Citizen Lab Broadcast Join**: Joins on `target_domain` (bare domain extracted from OONI `input` field) against a similarly extracted bare domain from Citizen Lab's `url` column. Both sides are lowercased before joining.
-  4. **Tampering Vector Classification**: Maps the `blocking` field value to a standard label (`BENIGN`, `DNS_MANIPULATION`, `TCP_BLOCKING`, `HTTP_BLOCKING`, `CONTENT_SUBSTITUTION`).
-  5. **Deduplication**: Delta Lake `MERGE INTO` on `measurement_id` with `measurement_date` partition pruning.
+  2. **Polymorphic test_keys Parsing & Child Tables**: `test_keys` is stored as a raw JSON string at Bronze (see §5.1 for rationale). In Silver, it is parsed per `test_name`. Multi-query DNS, TCP connect arrays, and messaging endpoints are projected into normalized child tables (`silver_dns_experiments`, `silver_tcp_experiments`, `silver_app_anomaly_measurements`) while `silver_network_measurements` maintains a strict 1:1 grain per probe.
+  3. **Citizen Lab Two-Tier Broadcast Join**: Joins on exact normalized URL with fallback to bare domain.
+  4. **Tampering Vector Classification**: Standardized labels (`DNS_TAMPERING`, `TCP_RESET`, `TLS_DROP`, `HTTP_BLOCK`, `BENIGN`, `UNKNOWN`) and multi-signal status (`CONFIRMED_CENSORSHIP`, `SUSPECTED_ANOMALY`, `UNCONFIRMED_ANOMALY`, `BENIGN_ACCESSIBLE`, `INSUFFICIENT_TELEMETRY`).
+  5. **Deduplication**: Delta Lake `MERGE INTO` on `measurement_id` with `target.measurement_date = source.measurement_date` partition pruning.
 
 ### 4.3 Gold Layer (Business Marts & Dimensional Star Schema)
 The Gold layer provides high-performance, analytics-ready tables modeled in a **Star Schema** optimized for analytical queries:
 
-* **Fact Table**: `fact_network_anomaly`
-  * Granularity: One row per confirmed network test failure/anomaly.
+* **Fact Table**: `fact_network_measurement`
+  * Granularity: One row per normalized network measurement (preserves benign tests for accurate denominator censorship rates).
   * Foreign Keys: `date_key`, `country_code`, `asn_id`, `category_code`.
-  * Measures: `dns_anomaly_flag`, `tcp_anomaly_flag`, `tls_anomaly_flag`, `http_anomaly_flag`, `response_latency_ms`.
+  * Measures: `dns_anomaly_flag`, `tcp_anomaly_flag`, `tls_anomaly_flag`, `http_anomaly_flag`, `test_runtime_seconds`.
 * **Dimension Tables**:
   * `dim_country_region`: ISO country details, geopolitical region, Press Freedom Index ranking (`press_freedom_index_tier`).
   * `dim_isp_telecom`: Autonomous System details, brand name, state-owned vs. private commercial classification (`ownership_type`).

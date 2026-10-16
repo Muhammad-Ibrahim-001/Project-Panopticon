@@ -75,7 +75,11 @@ Project-Panopticon/
 │   │   └── sample_citizenlab_categories.csv   # Citizen Lab URL taxonomy (~68 KB, 670+ records)
 │   └── schemas/                               # Machine-readable PySpark StructType contracts
 │       ├── bronze_ooni_schema.json            # Bronze strict Schema-on-Read contract
-│       └── silver_conformed_schema.json       # Silver cleansed & enriched schema contract
+│       ├── silver_conformed_schema.json       # Silver conformed 1:1 measurement contract
+│       ├── silver_dns_experiments_schema.json # Silver normalized DNS queries & answers
+│       ├── silver_tcp_experiments_schema.json # Silver normalized TCP connect attempts
+│       ├── silver_app_anomaly_schema.json     # Silver normalized app probe telemetry
+│       └── ref_citizenlab_categories_schema.json # Citizen Lab reference taxonomy contract
 ├── notebooks/                                 # Implementation PySpark pipelines
 │   ├── 00_config.py                           # Central configuration, DBFS/local paths & API endpoints
 │   ├── 00_audit_logger.py                     # Context manager & operational Delta logger
@@ -100,17 +104,22 @@ Project-Panopticon/
   - **Delta MERGE INTO**: Keyed merge with ANSI NULL-safe `<=>` matching on composite natural keys (`report_id`, `input`, `measurement_start_time`) with deterministic window deduplication (`_panopticon_rank`).
   - **Staging Isolation**: Raw JSON reading is explicitly scoped by country glob (`ooni_{clean_cc}_*.json`) preventing cross-country file bleeding when staging multiple countries under the same date partition.
   - **Ingestion Manifest**: Programmatic REST API fetcher produces an authoritative `IngestionManifest` sidecar (`_manifest.json`) recording payload SHA-256 checksums, byte sizes, and record counts. Manifest validation is hoisted before table existence checks to guarantee strict data integrity.
-* **Core Columns (26 total)**:
-  - Natural Telemetry (22): `measurement_uid` (String), `report_id` (String), `input` (String), `test_name` (String), `measurement_start_time` (String), `test_start_time` (String), `probe_asn` (String), `probe_cc` (String - Partition Key), `probe_id` (String), `probe_ip` (String), `probe_network_name` (String), `resolver_asn` (String), `resolver_ip` (String), `resolver_network_name` (String), `test_runtime` (Double), `software_name` (String), `software_version` (String), `test_version` (String), `data_format_version` (String), `annotations` (String), `test_helpers` (String), `test_keys` (**StringType — raw JSON string**; polymorphic union type parsed per `test_name` in Silver).
+* **Core Columns (29 total)**:
+  - Natural Telemetry (25): `measurement_uid` (String), `report_id` (String), `input` (String), `test_name` (String), `measurement_start_time` (String), `test_start_time` (String), `probe_asn` (String), `probe_cc` (String - Partition Key), `probe_id` (String), `probe_ip` (String), `probe_network_name` (String), `resolver_asn` (String), `resolver_ip` (String), `resolver_network_name` (String), `test_runtime` (Double), `software_name` (String), `software_version` (String), `test_version` (String), `data_format_version` (String), `annotations` (String), `test_helpers` (String), `api_anomaly` (Boolean), `api_confirmed` (Boolean), `extensions` (String), `test_keys` (**StringType — raw JSON string**; polymorphic union type parsed per `test_name` in Silver).
   - Derived Partition Key (1): `measurement_date` (Date - Partition Key).
   - Ingestion Lineage & Audit (3): `load_timestamp` (Timestamp - Audit), `_source_file` (String - Audit), `_batch_id` (String - Audit).
   - Permissive Trap Column (Pre-Quarantine): `_corrupt_record` (String; diverted to `quarantine_ooni_raw`).
 
 ### Silver Layer: `silver_network_measurements` (Cleansed, Sanitized, Enriched)
 * **Storage**: Delta Lake (Snappy Compressed) | `PARTITIONED BY (measurement_date)` | `ZORDER BY (probe_cc, probe_asn, tampering_vector)`
-* **Primary Key**: `measurement_id` (Deterministic SHA-256 of `report_id || input || measurement_start_time`)
-* **CDC & Reconciliation**: Maintained via idempotent Delta Lake `MERGE INTO` operations scanning a 3-day rolling lookback window ($T-3$ to $T$). Inserts late-arriving measurements from offline/mobile probes (`WHEN NOT MATCHED`) and updates enriched taxonomy attributes (`WHEN MATCHED`, using NULL-safe `<=>` comparisons on `content_category`, `tampering_vector`, and anomaly flags) with zero row duplication. **PK note**: OONI's native `measurement_uid` is not present in raw S3 JSONL (confirmed by OONI base data format spec `df-000-base.md`). Primary key is a composite SHA-256 hash of `report_id || input || measurement_start_time`. Note: This composite hash has a theoretical collision risk for simultaneous same-report probes within the same second; this is an acceptable risk for academic-scale datasets under 100K records.
-* **Core Columns**: `measurement_id` (String - PK), `report_id` (String), `event_timestamp` (Timestamp UTC), `measurement_date` (Date), `target_url` (String - Sanitized), `target_domain` (String), `probe_asn` (Long), `probe_cc` (String), `probe_network_name` (String), `masked_probe_subnet` (String - `/24` Mask), `hashed_resolver_ip` (String - Salted HMAC-SHA256), `resolver_asn` (Long), `test_name` (String), `tampering_vector` (String: `DNS_TAMPERING`, `TCP_RESET`, `TLS_DROP`, `HTTP_BLOCK`, `BENIGN`), `is_anomaly` (Boolean), `dns_anomaly_flag` (Integer), `tcp_anomaly_flag` (Integer), `tls_anomaly_flag` (Integer), `http_anomaly_flag` (Integer), `duration_seconds` (Double), `content_category` (String), `category_description` (String), `human_rights_risk_tier` (String: `HIGH`, `MEDIUM`, `LOW`), `load_timestamp` (Timestamp - Audit), `_batch_id` (String - Audit).
+* **Primary Key**: `measurement_id` (`coalesce(measurement_uid, sha2(concat_ws('||', probe_cc, measurement_date, report_id, measurement_start_time, test_name, coalesce(input, 'NO_INPUT')), 256))`).
+* **Strict 1:1 Grain**: Exactly one row per network measurement probe. Multi-query DNS arrays, TCP connects, and messaging endpoints are projected into dedicated child tables (`silver_dns_experiments`, `silver_tcp_experiments`, `silver_app_anomaly_measurements`) to eliminate Cartesian fan-out and prevent `DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE` crashes.
+* **CDC & Reconciliation**: Maintained via idempotent Delta Lake `MERGE INTO` operations scanning a 3-day rolling lookback window ($T-3$ to $T$) with partition pruning (`target.measurement_date = source.measurement_date`). Inserts late-arriving measurements (`WHEN NOT MATCHED`) and updates enriched taxonomy attributes (`WHEN MATCHED`, using NULL-safe `<=>` comparisons on `content_category`, `tampering_vector`, `is_anomaly`, `classification_status`) with zero write amplification and zero row duplication.
+* **Core Columns (32 total)**: `measurement_id` (String - PK), `measurement_uid` (String), `report_id` (String), `event_timestamp` (Timestamp UTC), `measurement_date` (Date - Partition Key), `target_url` (String - Sanitized), `target_domain` (String), `probe_asn` (Long - `0L` fallback), `probe_cc` (String), `probe_network_name` (String), `hashed_resolver_ip` (String - Peppered SHA-256), `resolver_asn` (Long), `test_name` (String), `ooni_anomaly` (Boolean), `ooni_confirmed` (Boolean), `is_anomaly` (Boolean - Multi-Signal), `classification_status` (String: `CONFIRMED_BLOCKED`, `HEURISTIC_ANOMALY`, `BENIGN`, `UNCLASSIFIED`), `tampering_vector` (String: `DNS_TAMPERING`, `TCP_RESET`, `TLS_DROP`, `HTTP_BLOCK`, `BENIGN`, `ANOMALY_UNCLASSIFIED`, `UNCLASSIFIED`), `dns_anomaly_flag` (Integer), `tcp_anomaly_flag` (Integer), `tls_anomaly_flag` (Integer), `http_anomaly_flag` (Integer), `dns_experiment_failure` (String), `http_experiment_failure` (String), `test_runtime_seconds` (Double), `content_category` (String), `category_description` (String), `category_match_type` (String: `EXACT_URL`, `DOMAIN_FALLBACK`, `UNMATCHED`), `taxonomy_version` (String), `human_rights_risk_tier` (String: `HIGH`, `MEDIUM`, `LOW`), `load_timestamp` (Timestamp - Audit), `_batch_id` (String - Audit).
+* **Child Tables**:
+  - `silver_dns_experiments`: Exploded DNS queries, answers, bogon detection, and resolver tamper flags (`dns_experiment_id` PK).
+  - `silver_tcp_experiments`: Exploded TCP connection attempts, destination ports, and reset flags (`tcp_experiment_id` PK).
+  - `silver_app_anomaly_measurements`: Exploded non-web app probes (WhatsApp, Telegram, Signal, Tor, Psiphon) (`app_measurement_id` PK).
 
 ### Operational Logs: `pipeline_execution_logs` (Governance & Auditing)
 * **Storage**: Delta Lake (**MERGE-based write pattern** — not append-only; each pipeline run opens with a `status='Running'` insert, then MERGEs final metrics on `log_id` at completion, ensuring exactly one row per run)
@@ -123,9 +132,9 @@ Project-Panopticon/
 
 ## 🔐 Data Security & PII Governance
 Because probe runners include investigative journalists, civil dissidents, and human rights defenders under authoritarian regimes, privacy is enforced at the **Bronze $\rightarrow$ Silver boundary**:
-1. **Cryptographic Salted Hashing**: DNS resolver IP addresses (`resolver_ip`) are pseudonymized using `HMAC-SHA256(resolver_ip + PEPPER_SALT)` to preserve longitudinal analysis while guaranteeing zero PII leakage.
-2. **Subnet Masking**: Client IPv4 addresses (`probe_ip`) are truncated to `/24` subnets (`192.168.1.0/24`) to eliminate household identification.
-3. **URL Query-String Cleansing**: Target URLs are scrubbed with regex validators to strip authentication tokens, session cookies, and tracking IDs (`?token=...`, `&session_id=...`).
+1. **Cryptographic Peppered Hashing**: DNS resolver IP addresses (`resolver_ip`) are pseudonymized using `sha2(concat(resolver_ip, PEPPER_SALT), 256)` (peppered SHA-256 hash, not HMAC) to preserve longitudinal ISP resolver correlation while guaranteeing zero client PII leakage.
+2. **PII Data Minimization & Identifier Purging**: OONI client `probe_id`, loopback IP (`probe_ip` — redacted by OONI to `127.0.0.1`), and raw protocol dump strings (`test_keys`) are explicitly excluded from Silver tables to minimize threat exposure. Raw `resolver_address` is also excluded from child DNS tables.
+3. **URL Query-String & Token Cleansing**: Target URLs are scrubbed with regex validators to strip authentication tokens, session cookies, and tracking credentials (`?token=...`, `&session_id=...`).
 4. **GDPR Right-to-be-Forgotten**: Delta Lake ACID deletion vectors allow targeted removal of individual anonymized probe records without rebuilding entire historical partitions.
 
 ---

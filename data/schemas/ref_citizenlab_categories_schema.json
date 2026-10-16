@@ -1,0 +1,49 @@
+{
+  "title": "Panopticon Citizen Lab Reference Categories Schema",
+  "description": "Standardized schema contract for ref_citizenlab_categories URL taxonomy lookup table",
+  "type": "struct",
+  "fields": [
+    {
+      "name": "url",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Target URL tested for internet censorship" }
+    },
+    {
+      "name": "category_code",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Standard Citizen Lab 4-letter category code (e.g. NEWS, POLR, LGBT, FILE)" }
+    },
+    {
+      "name": "category_description",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Human-readable English description of content category" }
+    },
+    {
+      "name": "country_code",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Two-letter ISO country code or 'GLOBAL' for universal list" }
+    },
+    {
+      "name": "taxonomy_version",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Git commit SHA or release tag of upstream Citizen Lab repository" }
+    },
+    {
+      "name": "load_timestamp",
+      "type": "timestamp",
+      "nullable": false,
+      "metadata": { "comment": "Audit: UTC timestamp of ingestion into reference catalog" }
+    },
+    {
+      "name": "_source_url",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Audit: GitHub REST / HTTPS download endpoint provenance" }
+    }
+  ]
+}

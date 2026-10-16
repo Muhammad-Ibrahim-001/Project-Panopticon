@@ -7,7 +7,13 @@
       "name": "measurement_id",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Primary Key: SHA256 deterministic hash of report_id, input, and measurement_start_time" }
+      "metadata": { "comment": "Primary Key: coalesce(measurement_uid, sha2(concat_ws('||', probe_cc, measurement_date, report_id, measurement_start_time, test_name, coalesce(input, 'NO_INPUT')), 256))" }
+    },
+    {
+      "name": "measurement_uid",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "Optional upstream OONI measurement UUID from API metadata" }
     },
     {
       "name": "report_id",
@@ -42,8 +48,8 @@
     {
       "name": "probe_asn",
       "type": "long",
-      "nullable": false,
-      "metadata": { "comment": "Cleaned numeric Autonomous System Number (e.g. 9541)" }
+      "nullable": true,
+      "metadata": { "comment": "Cleaned numeric Autonomous System Number (e.g. 9541, defaults to 0L if unknown)" }
     },
     {
       "name": "probe_cc",
@@ -58,16 +64,10 @@
       "metadata": { "comment": "Normalized telecom provider / ISP name" }
     },
     {
-      "name": "masked_probe_subnet",
-      "type": "string",
-      "nullable": true,
-      "metadata": { "comment": "Anonymized /24 IPv4 subnet prefix (e.g. 192.168.1.0/24)" }
-    },
-    {
       "name": "hashed_resolver_ip",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Cryptographic salted HMAC-SHA256 pseudonymized DNS resolver identifier" }
+      "metadata": { "comment": "Cryptographic peppered SHA-256 pseudonymized DNS resolver identifier (salted SHA-256, not HMAC)" }
     },
     {
       "name": "resolver_asn",
@@ -82,16 +82,34 @@
       "metadata": { "comment": "Network test name" }
     },
     {
-      "name": "tampering_vector",
-      "type": "string",
-      "nullable": false,
-      "metadata": { "comment": "Classification: DNS_TAMPERING, TCP_RESET, TLS_DROP, HTTP_BLOCK, or BENIGN" }
+      "name": "ooni_anomaly",
+      "type": "boolean",
+      "nullable": true,
+      "metadata": { "comment": "Raw anomaly flag asserted by OONI client test engine" }
+    },
+    {
+      "name": "ooni_confirmed",
+      "type": "boolean",
+      "nullable": true,
+      "metadata": { "comment": "Raw confirmed censorship flag asserted by OONI API metadata" }
     },
     {
       "name": "is_anomaly",
       "type": "boolean",
       "nullable": false,
-      "metadata": { "comment": "Boolean indicator flag: true if network interference was detected" }
+      "metadata": { "comment": "Synthesized multi-signal interference indicator flag" }
+    },
+    {
+      "name": "classification_status",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Multi-signal classification status: CONFIRMED_BLOCKED, HEURISTIC_ANOMALY, BENIGN, UNCLASSIFIED" }
+    },
+    {
+      "name": "tampering_vector",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Classification: DNS_TAMPERING, TCP_RESET, TLS_DROP, HTTP_BLOCK, BENIGN, ANOMALY_UNCLASSIFIED, UNCLASSIFIED" }
     },
     {
       "name": "dns_anomaly_flag",
@@ -130,10 +148,10 @@
       "metadata": { "comment": "HTTP failure message" }
     },
     {
-      "name": "duration_seconds",
+      "name": "test_runtime_seconds",
       "type": "double",
       "nullable": true,
-      "metadata": { "comment": "Execution duration in seconds" }
+      "metadata": { "comment": "Execution duration in seconds (renamed from duration_seconds / response_latency_ms)" }
     },
     {
       "name": "content_category",
@@ -146,6 +164,18 @@
       "type": "string",
       "nullable": true,
       "metadata": { "comment": "Human-readable Citizen Lab category description" }
+    },
+    {
+      "name": "category_match_type",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Citizen Lab match tier: EXACT_URL, DOMAIN_FALLBACK, or UNMATCHED" }
+    },
+    {
+      "name": "taxonomy_version",
+      "type": "string",
+      "nullable": false,
+      "metadata": { "comment": "Citizen Lab taxonomy version commit SHA or release tag" }
     },
     {
       "name": "human_rights_risk_tier",

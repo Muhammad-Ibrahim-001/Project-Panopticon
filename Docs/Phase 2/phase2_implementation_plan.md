@@ -76,25 +76,28 @@ During Phase 2 review, instructor feedback identified two critical architectural
 
 ```mermaid
 flowchart TD
-    subgraph Raw_Layer["Raw Storage (S3 / FileStore)"]
+    subgraph Raw_Layer["Raw Storage (S3 / REST API)"]
         RawJSON["OONI Network Telemetry (.json / .jsonl)"]
         RefCSV["Citizen Lab Category Taxonomy (.csv)"]
     end
 
-    subgraph Bronze_Layer["Bronze Layer (Raw Storage Landing)"]
-        SchemaRead["Strict Schema-on-Read (StructType)"]
+    subgraph Bronze_Layer["Bronze Layer (Raw Landing & Preservation)"]
+        SchemaRead["Strict Schema-on-Read (Explicit StructType)"]
         DriftRouter{"Schema Drift / Malformed?"}
-        BronzeDelta[("bronze_ooni_raw (Delta Table)")]
+        BronzeDelta[("bronze_ooni_raw (Delta Table - Append Only)")]
         QuarantineDelta[("quarantine_ooni_raw (Delta Table)")]
     end
 
-    subgraph Silver_Layer["Silver Layer (Cleansed, Sanitized, Enriched)"]
-        PIIMasking["Cryptographic PII Masking (HMAC-SHA256)"]
-        Flattening["Array Exploding & Normalization"]
-        VectorEngine["Tampering Vector Classification Engine"]
-        RefJoin["Broadcast Join with Citizen Lab Categories"]
-        DeltaMerge["Idempotent Upsert (Delta MERGE INTO)"]
-        SilverDelta[("silver_network_measurements (Delta Table)")]
+    subgraph Silver_Layer["Silver Layer (Normalized 1:1 Conformed + Child Tables)"]
+        PIIMasking["Cryptographic PII Sanitization (Salted HMAC)"]
+        EventSplitter["Polymorphic Routing & 1:1 Event Projection"]
+        VectorEngine["Multi-Signal Tampering Classification Engine"]
+        RefJoin["2-Tier Citizen Lab Enrichment (Exact URL + Domain Fallback)"]
+        DeltaMerge["Idempotent Delta MERGE INTO (Pruned by Partition)"]
+        SilverDelta[("silver_network_measurements (Primary 1:1 Table)")]
+        SilverDNS[("silver_dns_experiments (Child Table)")]
+        SilverTCP[("silver_tcp_experiments (Child Table)")]
+        SilverApp[("silver_app_anomaly_measurements (App Table)")]
     end
 
     subgraph Operational_Layer["Operational Governance & Auditing"]
@@ -108,9 +111,14 @@ flowchart TD
     DriftRouter -- Corrupt Records --> QuarantineDelta
 
     BronzeDelta --> PIIMasking
+    PIIMasking --> EventSplitter
     RefCSV --> RefJoin
-    PIIMasking --> Flattening
-    Flattening --> VectorEngine
+
+    EventSplitter -->|Web Connectivity 1:1 Events| VectorEngine
+    EventSplitter -->|explode_outer Queries| SilverDNS
+    EventSplitter -->|explode_outer TCP Connect| SilverTCP
+    EventSplitter -->|Messaging/Circumvention Tests| SilverApp
+
     VectorEngine --> RefJoin
     RefJoin --> DeltaMerge
     DeltaMerge --> SilverDelta
@@ -129,24 +137,32 @@ Stores raw, unmanipulated records landed with audit metadata.
 
 | Column Name | PySpark Data Type | Nullable | Primary Key | Description |
 | :--- | :--- | :---: | :---: | :--- |
-| `report_id` | `StringType` | No | No | Unique test report identifier from OONI probe |
-| `input` | `StringType` | Yes | No | Target test URL or network domain |
-| `test_name` | `StringType` | No | No | Name of the test (`web_connectivity`, `echcheck`, etc.) |
-| `test_start_time` | `StringType` | No | No | Unparsed start time string from source payload |
+| `measurement_uid` | `StringType` | Yes | Lineage | Stable global UUID from OONI backend API (SILVER-04) |
+| `report_id` | `StringType` | No | Natural Key Part | Unique test report identifier from OONI probe |
+| `input` | `StringType` | Yes | Natural Key Part | Target test URL or network domain |
+| `test_name` | `StringType` | No | Natural Key Part | Name of the test (`web_connectivity`, `whatsapp`, `signal`, etc.) |
+| `measurement_start_time` | `StringType` | No | Natural Key Part | Raw start time string from source payload |
+| `test_start_time` | `StringType` | Yes | No | Unparsed initial probe process timestamp |
 | `probe_asn` | `StringType` | No | No | Autonomous System Number of probe (e.g., `AS9541`) |
-| `probe_cc` | `StringType` | No | No | ISO country code of testing probe (e.g., `PK`) |
-| `probe_ip` | `StringType` | Yes | No | Raw client IP address (to be sanitized in Silver) |
+| `probe_cc` | `StringType` | No | Partition Key | ISO country code of testing probe (e.g., `PK`, `IR`) |
+| `probe_id` | `StringType` | Yes | Lineage Audit | Anonymous credentials probe installation ID (SILVER-01) |
+| `probe_ip` | `StringType` | Yes | Upstream Redacted | Client IP address (redacted upstream by OONI to `127.0.0.1` — SILVER-02) |
 | `probe_network_name` | `StringType` | Yes | No | ISP / Telecom operator name |
 | `resolver_asn` | `StringType` | Yes | No | Resolver Autonomous System Number |
-| `resolver_ip` | `StringType` | Yes | No | Local DNS resolver IP |
+| `resolver_ip` | `StringType` | Yes | Sensitive PII | Local DNS resolver IP (pseudonymized in Silver) |
 | `resolver_network_name`| `StringType` | Yes | No | Resolver network name |
-| `test_runtime` | `DoubleType` | Yes | No | Total execution duration of test in seconds |
+| `test_runtime` | `DoubleType` | Yes | No | Total wall-clock execution duration of test runner in seconds (SILVER-40) |
 | `software_name` | `StringType` | Yes | No | Testing agent client software |
 | `software_version` | `StringType` | Yes | No | Client version |
+| `extensions` | `StringType` | Yes | No | Stringified probe protocol extensions (`dnst`, `httpt` — SILVER-05) |
+| `api_anomaly` | `BooleanType` | Yes | Ground Truth | Authoritative anomaly flag from OONI API Stage 1 (SILVER-06, SILVER-41) |
+| `api_confirmed` | `BooleanType` | Yes | Ground Truth | Authoritative confirmed censorship flag from OONI API Stage 1 |
 | `test_keys` | `StringType` | Yes | No | **Raw JSON string** (polymorphic — parsed per `test_name` in Silver; see §5.1) |
+| `measurement_date` | `DateType` | No | Partition Key | Partition key derived from `measurement_start_time` |
 | `load_timestamp` | `TimestampType` | No | No | **[Audit]** Exact UTC timestamp of pipeline ingestion |
-| `_source_file` | `StringType` | No | No | **[Audit]** Input file name / S3 path |
+| `_source_file` | `StringType` | No | No | **[Audit]** Input file name / S3 path / API origin |
 | `_batch_id` | `StringType` | No | No | **[Audit]** Execution batch parameter / date |
+| `_corrupt_record` | `StringType` | Yes | Quarantine | Malformed JSON syntax diverted to quarantine table |
 
 **Bronze Idempotency & Partition Isolation Note (verified from Delta Lake docs)**:
 `df.write.format("delta").mode("append")` is **not idempotent** — re-running the same batch creates duplicate rows in Bronze. Furthermore, partitioning solely by `measurement_date` causes single-country writes to erase other countries for that date. The production pattern is composite partitioning by `(probe_cc, measurement_date)` with scoped `replaceWhere` or keyed Delta `MERGE INTO`:
@@ -160,31 +176,40 @@ df_valid.write \
     .option("replaceWhere", f"probe_cc = '{country_code}' AND measurement_date = '{batch_date}'") \
     .save(bronze_path)
 ```
-This guarantees strict isolation across both geographical and temporal dimensions. Re-running any country batch cleanly replaces only that partition without touching other countries or historical dates.
 
 ### 4.2 Silver Layer: `silver_network_measurements`
-Cleansed, flattened, typed, PII-sanitized, and enriched with Citizen Lab categories.
+Cleansed, typed, PII-sanitized, and enriched with Citizen Lab categories at a **strictly 1:1 measurement grain**. Array fields are normalized into child tables (`silver_dns_experiments`, `silver_tcp_experiments`) to prevent Delta MERGE crashes and OOM errors (SILVER-12, SILVER-13).
 
 | Column Name | PySpark Data Type | Nullable | Primary Key | Description |
 | :--- | :--- | :---: | :---: | :--- |
-| `measurement_id` | `StringType` | No | **PK** | Deterministic hash: `sha2(concat_ws('\|\|', report_id, coalesce(input,'NO_INPUT'), measurement_start_time), 256)`. **Note**: OONI's native `measurement_uid` (the globally stable backend ID) is **not present in raw S3 JSONL** — confirmed by OONI base data format spec (`df-000-base.md`), which lists only `id` (a client-generated UUID that collectors clear on receipt) and `report_id`. The composite SHA-256 hash has a theoretical collision risk for simultaneous probes within the same second from the same report, but this is an accepted trade-off at academic scale (<100K records). |
-| `event_timestamp` | `TimestampType` | No | No | Parsed UTC timestamp of test execution |
+| `measurement_id` | `StringType` | No | **PK** | Deterministic surrogate key: `coalesce(measurement_uid, sha2(concat_ws('\|\|', probe_cc, measurement_date, report_id, measurement_start_time, test_name, coalesce(input, 'NO_INPUT')), 256))` (SILVER-16, SILVER-17, SILVER-18). |
+| `measurement_uid` | `StringType` | Yes | Lineage | Preserved OONI backend UUID for audit traceability |
+| `report_id` | `StringType` | No | Lineage FK | Report session batch identifier |
+| `event_timestamp` | `TimestampType` | No | No | Standardized UTC timestamp of test execution |
+| `measurement_date` | `DateType` | No | Partition Key | Physical partition key enabling Delta partition pruning |
 | `target_url` | `StringType` | Yes | No | Sanitized target URL (query credentials scrubbed) |
-| `target_domain` | `StringType` | Yes | No | Extracted second-level domain name |
-| `probe_asn` | `LongType` | No | No | Cleaned numeric Autonomous System Number |
+| `target_domain` | `StringType` | Yes | Join Key | Extracted second-level domain name |
+| `probe_asn` | `LongType` | Yes | No | Cleaned numeric ASN with `0L` fallback for unresolved networks (SILVER-03) |
 | `probe_cc` | `StringType` | No | No | ISO country code (e.g., `PK`, `IR`, `RU`) |
-| `probe_network_name` | `StringType` | Yes | No | Telecommunications provider / ISP |
-| `masked_probe_subnet`| `StringType` | Yes | No | Truncated `/24` subnet masking client IP |
-| `hashed_resolver_ip` | `StringType` | Yes | No | Cryptographically salted HMAC-SHA256 resolver hash |
+| `probe_network_name` | `StringType` | Yes | No | Commercial ISP name operating the testing agent |
+| `hashed_resolver_ip` | `StringType` | Yes | No | Cryptographically salted HMAC-SHA256 resolver hash (raw IPs dropped — SILVER-02, SILVER-43) |
+| `resolver_asn` | `LongType` | Yes | No | Cleaned numeric ASN of DNS resolver |
 | `test_name` | `StringType` | No | No | Network test classification |
-| `tampering_vector` | `StringType` | No | No | Attack label (`DNS_TAMPERING`, `TCP_RESET`, `TLS_DROP`, `BENIGN`) |
-| `is_anomaly` | `BooleanType` | No | No | Binary anomaly flag indicating censorship activity |
-| `dns_experiment_failure` | `StringType` | Yes | No | DNS-level error message if present |
-| `http_experiment_failure`| `StringType` | Yes | No | HTTP-level error message if present |
-| `duration_seconds` | `DoubleType` | Yes | No | Standardized numeric execution runtime |
-| `content_category` | `StringType` | Yes | No | Citizen Lab category code (`NEWS`, `CULTR`, `POL`) |
-| `category_description` | `StringType` | Yes | No | Full descriptive label from category taxonomy |
-| `human_rights_risk_tier`| `StringType`| Yes | No | Assigned vulnerability level (`HIGH`, `MEDIUM`, `LOW`) |
+| `ooni_anomaly` | `BooleanType` | Yes | Ground Truth | Authoritative OONI backend anomaly flag (SILVER-41) |
+| `ooni_confirmed` | `BooleanType` | Yes | Ground Truth | Authoritative OONI backend confirmed flag |
+| `tampering_vector` | `StringType` | No | No | Multi-signal classification: `DNS_TAMPERING`, `TCP_RESET`, `TLS_DROP`, `HTTP_BLOCK`, `BENIGN`, `UNCLASSIFIED` (SILVER-06) |
+| `classification_status`| `StringType`| No | Governance | Explicit epistemic rating: `CONFIRMED_BLOCKED`, `HEURISTIC_ANOMALY`, `BENIGN`, `UNCLASSIFIED` (SILVER-41) |
+| `is_anomaly` | `BooleanType` | No | No | True strictly if verified heuristic tampering detected. Parser errors evaluate to false (SILVER-41) |
+| `dns_anomaly_flag` | `IntegerType` | No | Measure | Binary flag for Power BI sum measures (1 if DNS_TAMPERING else 0) |
+| `tcp_anomaly_flag` | `IntegerType` | No | Measure | Binary flag for Power BI sum measures (1 if TCP_RESET else 0) |
+| `tls_anomaly_flag` | `IntegerType` | No | Measure | Binary flag for Power BI sum measures (1 if TLS_DROP else 0) |
+| `http_anomaly_flag`| `IntegerType` | No | Measure | Binary flag for Power BI sum measures (1 if HTTP_BLOCK else 0) |
+| `test_runtime_seconds`| `DoubleType` | Yes | No | Wall-clock test runner duration in seconds (not HTTP latency — SILVER-40) |
+| `content_category` | `StringType` | No | Enrichment | Citizen Lab category code joined via 2-tier match (SILVER-42) |
+| `category_description`| `StringType`| Yes | Enrichment | Full descriptive label from category taxonomy |
+| `human_rights_risk_tier`| `StringType`| No | Governance | Assigned vulnerability level (`HIGH`, `MEDIUM`, `LOW`) |
+| `category_match_type` | `StringType` | No | Lineage | Provenance: `'EXACT_URL'`, `'DOMAIN_FALLBACK'`, `'UNMATCHED'` (SILVER-42) |
+| `taxonomy_version` | `StringType` | No | Reproducibility| Pinned Citizen Lab commit SHA / retrieval timestamp (SILVER-44) |
 | `load_timestamp` | `TimestampType` | No | No | **[Audit]** Exact UTC timestamp when record was upserted |
 | `_batch_id` | `StringType` | No | No | **[Audit]** Ingestion batch identifier |
 
@@ -230,33 +255,37 @@ Additionally, `test_keys` structure varies fundamentally by `test_name`:
 **Solution**: `test_keys` is stored as `StringType` at Bronze (raw JSON string preserved intact). In Silver, it is parsed using `from_json()` with a `test_name`-specific schema applied per partition — giving strict typing where it counts while surviving OONI's polymorphic payload structure.
 
 ```python
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, BooleanType
 
-# Bronze schema: test_keys stored as raw JSON string
+# Bronze schema: explicit StructType; test_keys stored as raw JSON string
 bronze_schema = StructType([
-    StructField("report_id",              StringType(), True),
-    StructField("input",                  StringType(), True),
-    StructField("test_name",              StringType(), True),
-    StructField("measurement_start_time", StringType(), True),
-    StructField("probe_asn",              StringType(), True),
-    StructField("probe_cc",               StringType(), True),
-    StructField("probe_ip",               StringType(), True),
-    StructField("probe_network_name",     StringType(), True),
-    StructField("resolver_asn",           StringType(), True),
-    StructField("resolver_ip",            StringType(), True),
-    StructField("resolver_network_name",  StringType(), True),
-    StructField("test_runtime",           DoubleType(), True),
-    StructField("software_name",          StringType(), True),
-    StructField("software_version",       StringType(), True),
-    StructField("data_format_version",    StringType(), True),
+    StructField("measurement_uid",       StringType(),  True),  # Global UUID from API index (SILVER-04)
+    StructField("report_id",              StringType(),  False),
+    StructField("input",                  StringType(),  True),
+    StructField("test_name",              StringType(),  False),
+    StructField("measurement_start_time", StringType(),  False),
+    StructField("probe_asn",              StringType(),  False),
+    StructField("probe_cc",               StringType(),  False),
+    StructField("probe_id",               StringType(),  True),  # Anonymous credential ID (SILVER-01)
+    StructField("probe_ip",               StringType(),  True),  # Upstream redacted to 127.0.0.1 (SILVER-02)
+    StructField("probe_network_name",     StringType(),  True),
+    StructField("resolver_asn",           StringType(),  True),
+    StructField("resolver_ip",            StringType(),  True),
+    StructField("resolver_network_name",  StringType(),  True),
+    StructField("test_runtime",           DoubleType(),  True),
+    StructField("software_name",          StringType(),  True),
+    StructField("software_version",       StringType(),  True),
+    StructField("data_format_version",    StringType(),  True),
+    StructField("extensions",             StringType(),  True),  # Preserved probe extensions (SILVER-05)
+    StructField("api_anomaly",            BooleanType(), True),  # Upstream Stage 1 ground truth (SILVER-06, SILVER-41)
+    StructField("api_confirmed",          BooleanType(), True),  # Upstream Stage 1 confirmed flag
     # test_keys is a polymorphic union-typed field — stored as raw JSON string.
-    # Parsed in Silver using from_json() per test_name.
-    StructField("test_keys",             StringType(), True),
-    StructField("_corrupt_record",        StringType(), True),
+    # Parsed in Silver using from_json() per test_name family.
+    StructField("test_keys",             StringType(),  True),
+    StructField("_corrupt_record",        StringType(),  True),
 ])
 
 # Read with strict schema enforcement; PERMISSIVE mode catches only JSON syntax errors.
-# Note: schema mismatches (unknown fields) are silently dropped — not routed to _corrupt_record.
 df_raw = (
     spark.read
     .schema(bronze_schema)
@@ -266,9 +295,6 @@ df_raw = (
 )
 
 # SPLIT BEFORE WRITING — corrupt records must not enter Bronze
-# Note: On Databricks Serverless (Photon Engine), querying only _corrupt_record from unmaterialized
-# JSON streams is disallowed ([UNSUPPORTED_FEATURE.QUERY_ONLY_CORRUPT_RECORD_COLUMN]), and .cache() is disabled.
-# Production Solution: Materialize df_raw to a temporary Delta staging path before filtering.
 temp_staging_path = f"{bronze_path}_temp_staging"
 df_raw.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(temp_staging_path)
 df_materialized = spark.read.format("delta").load(temp_staging_path)
@@ -276,7 +302,6 @@ df_materialized = spark.read.format("delta").load(temp_staging_path)
 df_valid     = df_materialized.filter(col("_corrupt_record").isNull()).drop("_corrupt_record")
 df_quarantine = df_materialized.filter(col("_corrupt_record").isNotNull())
 
-# Idempotent write via replaceWhere: replaces the target date partition without duplicate rows
 if df_quarantine.count() > 0:
     df_quarantine.write.format("delta").mode("append").save(quarantine_path)
 
@@ -287,55 +312,85 @@ df_valid_staged = df_valid.withColumns({
     "measurement_date": measurement_date_expr
 })
 
-df_valid_staged.write.format("delta").mode("overwrite").option("replaceWhere", f"measurement_date = '{batch_date}'").save(bronze_path)
+df_valid_staged.write.format("delta").mode("overwrite").option("replaceWhere", f"probe_cc = '{country_code}' AND measurement_date = '{batch_date}'").save(bronze_path)
 ```
 
-**Silver: Parse test_keys per test_name**
+**Silver: Polymorphic Routing & Multi-Signal Classification (SILVER-06, SILVER-07)**
 ```python
-from pyspark.sql.functions import from_json, col
+from pyspark.sql.functions import from_json, col, when, lit
 from pyspark.sql.types import StructType, StructField, StringType, BooleanType, LongType, DoubleType, ArrayType
 
-# Schema for web_connectivity test_keys only.
-# blocking is StringType here because from_json with StringType deserialises
-# the JSON boolean false as the string "false", which the classifier handles explicitly.
+# 1. Web Connectivity Schema (ts-017)
+# Note: Raw response body and network_events are omitted to prevent union-type corruption and OOM (SILVER-11, SILVER-13)
 web_connectivity_test_keys_schema = StructType([
-    StructField("blocking",               StringType(),  True),  # union bool|str -> StringType
+    StructField("blocking",               StringType(),  True),
     StructField("accessible",             BooleanType(), True),
     StructField("dns_experiment_failure", StringType(),  True),
     StructField("http_experiment_failure",StringType(),  True),
     StructField("control_failure",        StringType(),  True),
-    StructField("dns_consistency",        StringType(),  True),
-    StructField("body_proportion",        DoubleType(),  True),
-    StructField("body_length_match",      BooleanType(), True),
-    StructField("headers_match",          BooleanType(), True),
-    StructField("status_code_match",      BooleanType(), True),
-    StructField("title_match",            BooleanType(), True),
+    StructField("tcp_connect", ArrayType(
+        StructType([
+            StructField("ip", StringType(), True),
+            StructField("port", LongType(), True),
+            StructField("status", StructType([
+                StructField("blocked", BooleanType(), True),  # Crucial OONI signal (SILVER-09)
+                StructField("failure", StringType(), True),
+                StructField("success", BooleanType(), True)
+            ]), True)
+        ])
+    ), True),
+    StructField("tls_handshakes", ArrayType(
+        StructType([
+            StructField("failure", StringType(), True),
+            StructField("server_name", StringType(), True),
+            StructField("tls_version", StringType(), True)
+        ])
+    ), True)
 ])
 
-df_wc = df_bronze.filter(col("test_name") == "web_connectivity")
-df_wc = df_wc.withColumn(
-    "test_keys_parsed",
-    from_json(col("test_keys"), web_connectivity_test_keys_schema)
+# 2. Polymorphic Routing: Web tests vs Messaging/Circumvention tests (SILVER-07)
+df_wc = df_bronze.filter(col("test_name") == "web_connectivity").withColumn(
+    "test_keys_parsed", from_json(col("test_keys"), web_connectivity_test_keys_schema)
 )
 
-# Handle blocking union type: from_json gives us "false" (string) for JSON boolean false
-df_wc = df_wc.withColumn(
+df_apps = df_bronze.filter(col("test_name").isin("whatsapp", "telegram", "signal", "tor", "psiphon", "echcheck"))
+# Routed to dedicated silver_app_anomaly_measurements child table with app-specific heuristics
+
+# 3. Multi-Signal Tampering Classification (SILVER-06, SILVER-41)
+df_wc_classified = df_wc.withColumn(
     "tampering_vector",
-    when(col("test_keys_parsed.blocking").isNull() |
-         (col("test_keys_parsed.blocking") == "false"), lit("BENIGN"))
-    .when(col("test_keys_parsed.blocking") == "dns",          lit("DNS_MANIPULATION"))
-    .when(col("test_keys_parsed.blocking") == "tcp_ip",       lit("TCP_BLOCKING"))
-    .when(col("test_keys_parsed.blocking") == "http-failure", lit("HTTP_BLOCKING"))
-    .when(col("test_keys_parsed.blocking") == "http-diff",    lit("CONTENT_SUBSTITUTION"))
+    when((col("test_keys_parsed.blocking") == "dns") | col("test_keys_parsed.dns_experiment_failure").isNotNull(),
+         lit("DNS_TAMPERING"))
+    .when((col("test_keys_parsed.blocking") == "tcp_ip") |
+          (col("test_keys_parsed.tcp_connect")[0]["status"]["blocked"] == True) |
+          (col("test_keys_parsed.tcp_connect")[0]["status"]["failure"] == "connection_reset_by_peer"),
+          lit("TCP_RESET"))
+    .when(col("test_keys_parsed.tls_handshakes")[0]["failure"].isNotNull() |
+          col("test_keys_parsed.http_experiment_failure").rlike("(?i)(ssl|tls|handshake|certificate)"),
+          lit("TLS_DROP"))
+    .when(col("test_keys_parsed.blocking").isin("http-failure", "http-diff") |
+          col("test_keys_parsed.http_experiment_failure").isNotNull(),
+          lit("HTTP_BLOCK"))
+    .when((col("api_anomaly") == True) | (col("api_confirmed") == True),
+          lit("ANOMALY_UNCLASSIFIED"))
+    .when((col("test_keys_parsed.blocking").isNull() | (col("test_keys_parsed.blocking") == "false")) &
+          col("test_keys_parsed.dns_experiment_failure").isNull() &
+          col("test_keys_parsed.http_experiment_failure").isNull() &
+          (col("api_anomaly") == False),
+          lit("BENIGN"))
     .otherwise(lit("UNCLASSIFIED"))
+).withColumn(
+    "is_anomaly",
+    col("tampering_vector").isin("DNS_TAMPERING", "TCP_RESET", "TLS_DROP", "HTTP_BLOCK") |
+    (col("api_confirmed") == True)
 )
 ```
 
-### 5.2 Idempotent Delta MERGE Pattern (Late Arrivals & Dimensional Re-Enrichment)
-Because raw OONI measurements are immutable event logs, the `MERGE INTO` operation explicitly serves three operational purposes:
-1. **Late-Arriving Measurements**: Ingesting a rolling 3-day lookback window ($T-3$ to $T$) catches delayed uploads from offline/mobile probes; records with net-new `measurement_id` execute `whenNotMatchedInsertAll()`.
-2. **Dimensional Re-Enrichment**: If upstream Citizen Lab taxonomies update a domain's categorization or tampering classification heuristics are refined, `whenMatchedUpdate` updates enriched attributes without altering raw test keys.
-3. **Pipeline Idempotency**: Re-running a batch updates `load_timestamp` and `_batch_id` without creating duplicate rows.
+### 5.2 Idempotent Delta MERGE Pattern (Late Arrivals & Re-Enrichment Without Write Amplification)
+Because raw OONI measurements are immutable event logs, the `MERGE INTO` operation serves three explicit operational goals:
+1. **Late-Arriving Measurements**: Ingesting a rolling 3-day lookback window ($T-3$ to $T$) catches delayed uploads from offline/mobile probes; net-new `measurement_id` rows execute `whenNotMatchedInsertAll()`.
+2. **Dimensional Re-Enrichment**: When Citizen Lab updates a domain's categorization or tampering classification heuristics are refined, `whenMatchedUpdate` updates enriched attributes.
+3. **Zero Write Amplification (SILVER-20)**: `_batch_id` is updated in `set{}` but is **strictly excluded** from the `whenMatchedUpdate` trigger condition. If `target._batch_id != source._batch_id` were in the condition, every single run would match 100% of rows as updated, triggering full table rewrites and logging 100% false update metrics.
 
 ```python
 from delta.tables import DeltaTable
@@ -344,44 +399,48 @@ delta_silver = DeltaTable.forPath(spark, silver_delta_path)
 
 delta_silver.alias("target").merge(
     source=df_silver_staged.alias("source"),
-    # Partition predicate enables Delta partition pruning — avoids full-table scan
-    # on every incremental run. measurement_id alone is not a partition column;
-    # adding measurement_date restricts the scan to only the active date partitions.
+    # Partition predicate enables Delta partition pruning — avoids full-table scan (SILVER-21)
     condition=(
         "target.measurement_id = source.measurement_id "
         "AND target.measurement_date = source.measurement_date"
     )
 ).whenMatchedUpdate(
-    # NULL-safe equality operator <=> (also called 'spaceship operator').
-    # Standard != returns NULL (not FALSE) when either operand is NULL.
-    # This would silently skip updates for records where content_category was null
-    # (e.g., before Citizen Lab enrichment was added). <=> treats NULL = NULL as TRUE.
-    # NOT (a <=> b) means 'a differs from b, including null vs non-null cases'.
+    # NULL-safe equality operator <=> detects actual business content changes.
+    # Excludes _batch_id to prevent 100% false update write amplification (SILVER-20).
     condition=(
         "NOT (target.content_category <=> source.content_category) "
         "OR NOT (target.tampering_vector <=> source.tampering_vector) "
+        "OR NOT (target.is_anomaly <=> source.is_anomaly) "
         "OR NOT (target.dns_anomaly_flag <=> source.dns_anomaly_flag) "
         "OR NOT (target.tcp_anomaly_flag <=> source.tcp_anomaly_flag) "
         "OR NOT (target.tls_anomaly_flag <=> source.tls_anomaly_flag) "
         "OR NOT (target.http_anomaly_flag <=> source.http_anomaly_flag) "
-        "OR target._batch_id != source._batch_id"
+        "OR NOT (target.taxonomy_version <=> source.taxonomy_version)"
     ),
     set={
-        "tampering_vector":  "source.tampering_vector",
-        "dns_anomaly_flag":  "source.dns_anomaly_flag",
-        "tcp_anomaly_flag":  "source.tcp_anomaly_flag",
-        "tls_anomaly_flag":  "source.tls_anomaly_flag",
-        "http_anomaly_flag": "source.http_anomaly_flag",
-        "content_category":  "source.content_category",
-        "load_timestamp":    "current_timestamp()",
-        "_batch_id":         "source._batch_id"
+        "tampering_vector":     "source.tampering_vector",
+        "is_anomaly":           "source.is_anomaly",
+        "dns_anomaly_flag":     "source.dns_anomaly_flag",
+        "tcp_anomaly_flag":     "source.tcp_anomaly_flag",
+        "tls_anomaly_flag":     "source.tls_anomaly_flag",
+        "http_anomaly_flag":    "source.http_anomaly_flag",
+        "content_category":     "source.content_category",
+        "category_description": "source.category_description",
+        "human_rights_risk_tier":"source.human_rights_risk_tier",
+        "category_match_type":  "source.category_match_type",
+        "taxonomy_version":     "source.taxonomy_version",
+        "load_timestamp":       "current_timestamp()",
+        "_batch_id":            "source._batch_id"
     }
 ).whenNotMatchedInsertAll().execute()
 ```
 
-**Why `<=>` instead of `!=`**: Verified from Spark SQL / Delta Lake documentation — `<=>` is the NULL-safe equality operator. `a <=> b` returns `TRUE` when both are null, `TRUE` when both have the same non-null value, and `FALSE` otherwise. `NOT (a <=> b)` therefore correctly detects any change, including null-to-value transitions.
+### 5.3 Parameterized Backfill vs. Incremental Execution Pattern (SILVER-19)
+The OONI REST API filters by `measurement_start_time` via `since` and `until`. Mobile probe tests executed on $T-2$ but uploaded offline on $T$ will not appear in single-day $[T, T+1]$ API fetches. To guarantee complete discovery of late-arriving measurements:
+- The **Bronze API Ingestion Engine** accepts a `lookback_days` parameter and queries a sliding window:
+  `since = batch_date - lookback_days`, `until = batch_date + 1 day`.
+- The **Silver Lakehouse Engine** reads the corresponding partitioned window from Bronze and executes Delta `MERGE INTO`, reconciling state deterministically.
 
-### 5.3 Parameterized Backfill vs. Incremental Execution Pattern
 ```python
 # Databricks Widgets or CLI Parameterization
 dbutils.widgets.text("batch_date", "2026-09-27", "Batch Date (YYYY-MM-DD)")
@@ -392,8 +451,8 @@ batch_date = dbutils.widgets.get("batch_date")
 load_type = dbutils.widgets.get("load_type")
 lookback_days = int(dbutils.widgets.get("lookback_days"))
 
-# Calculate sliding lookback dates for incremental recovery:
-# Ingests [batch_date - lookback_days, batch_date]
+# Incremental load scans rolling window [batch_date - lookback_days, batch_date]
+# Full load scans baseline historical range; Backfill targets specific partitions.
 ```
 
 ---

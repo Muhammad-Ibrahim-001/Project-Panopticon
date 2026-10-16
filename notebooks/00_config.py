@@ -9,7 +9,7 @@
 #   - [Affects]: notebooks/02_silver_transformation.py
 #   - [Affects]: notebooks/run_pipeline.py
 #   - [Schema/State Changes]:
-#       * Centralizes DBFS and local storage paths (Raw Landing, Bronze, Silver, Quarantine, Logs)
+#       * Centralizes DBFS and local storage paths (Raw Landing, Bronze, Silver & child tables, Gold fact, Quarantine, Logs)
 #       * Defines public API endpoints (OONI Measurement API, Citizen Lab GitHub taxonomy)
 #       * Tunes Spark session configurations for Databricks Community Edition (shuffle partitions, memory caps)
 #       * Defines target country codes, default test names, and rolling lookback parameters
@@ -58,6 +58,10 @@ PATHS: Dict[str, str] = {
     "raw_landing": f"{STORAGE_ROOT}/raw",
     "bronze":      f"{STORAGE_ROOT}/bronze/bronze_ooni_raw",
     "silver":      f"{STORAGE_ROOT}/silver/silver_network_measurements",
+    "silver_dns":  f"{STORAGE_ROOT}/silver/silver_dns_experiments",
+    "silver_tcp":  f"{STORAGE_ROOT}/silver/silver_tcp_experiments",
+    "silver_app":  f"{STORAGE_ROOT}/silver/silver_app_anomaly_measurements",
+    "gold_fact":   f"{STORAGE_ROOT}/gold/fact_network_measurement",
     "quarantine":  f"{STORAGE_ROOT}/quarantine/quarantine_ooni_raw",
     "audit_logs":  f"{STORAGE_ROOT}/logs/pipeline_execution_logs",
     "reference":   f"{STORAGE_ROOT}/reference/citizenlab_categories",
@@ -67,6 +71,10 @@ PATHS: Dict[str, str] = {
 TABLE_NAMES: Dict[str, str] = {
     "bronze":      "bronze_ooni_raw",
     "silver":      "silver_network_measurements",
+    "silver_dns":  "silver_dns_experiments",
+    "silver_tcp":  "silver_tcp_experiments",
+    "silver_app":  "silver_app_anomaly_measurements",
+    "gold_fact":   "fact_network_measurement",
     "quarantine":  "quarantine_ooni_raw",
     "audit_logs":  "pipeline_execution_logs",
     "reference":   "ref_citizenlab_categories",
