@@ -1334,12 +1334,24 @@ def write_bronze_delta_table(
     df_ranked = df_bronze.withColumn("_panopticon_rank", row_number().over(window_spec))
     df_source_dedup = df_ranked.filter(col("_panopticon_rank") == 1).drop("_panopticon_rank")
 
-    # Check table existence
+    # Check table existence across both DBFS and Unity Catalog Volume paths
     table_exists = False
     try:
         table_exists = DeltaTable.isDeltaTable(spark, target_bronze)
     except Exception:
         table_exists = False
+
+    # Fallback probe for Databricks Serverless / Unity Catalog Volumes
+    if not table_exists:
+        try:
+            delta_log_dir = os.path.join(target_bronze, "_delta_log")
+            if os.path.exists(delta_log_dir) and len(os.listdir(delta_log_dir)) > 0:
+                table_exists = True
+            else:
+                spark.read.format("delta").load(target_bronze).limit(1).count()
+                table_exists = True
+        except Exception:
+            table_exists = False
 
     # --------------------------------------------------------------------------
     # SCENARIO A: Initial Table Creation
@@ -1442,8 +1454,13 @@ def _register_metastore_table(spark: SparkSession, table_path: str) -> None:
     """Safe registration in Spark catalog/metastore with explicit warning logging."""
     try:
         table_name = config.TABLE_NAMES["bronze"]
-        spark.sql(f"CREATE TABLE IF NOT EXISTS {table_name} USING DELTA LOCATION '{table_path}'")
-        print(f"[Bronze Persistence] Successfully registered metastore table: {table_name}")
+        if "/Volumes/" in table_path:
+            # On Unity Catalog Serverless, register as a view over the Volume path to avoid missing cloud scheme error
+            spark.sql(f"CREATE OR REPLACE VIEW {table_name} AS SELECT * FROM delta.`{table_path}`")
+            print(f"[Bronze Persistence] Successfully registered metastore view: {table_name}")
+        else:
+            spark.sql(f"CREATE TABLE IF NOT EXISTS {table_name} USING DELTA LOCATION '{table_path}'")
+            print(f"[Bronze Persistence] Successfully registered metastore table: {table_name}")
     except Exception as meta_err:
         print(f"[Bronze Persistence WARNING] Catalog registration skipped: {meta_err}")
 
