@@ -15,17 +15,19 @@
 #   - [External API]: Citizen Lab GitHub Raw Lists (https://raw.githubusercontent.com/citizenlab/test-lists/...)
 #   - [Local Fallback]: data/samples/sample_full_load_ooni.json, sample_incremental_ooni.json, sample_citizenlab_categories.csv
 # Downstream Impact:
-#   - [Generates Delta Table]: ref_citizenlab_categories (Reference table for URL taxonomy)
+#   - [Generates Delta Table]: ref_citizenlab_categories (Reference table for URL taxonomy with taxonomy_version)
 #   - [Generates Raw Landing Files]: raw/YYYYMMDD/ooni_raw_*.json (Landing directory on DBFS/Local with SHA-256 sidecars)
 #   - [Generates Delta Table]: bronze_ooni_raw (Partitioned by (probe_cc, measurement_date), atomic Delta table)
-#   - [Generates Delta Table]: quarantine_ooni_raw (Captures unparseable corrupt records)
-#   - [Defines Schema Contract]: BRONZE_OONI_SCHEMA (Enforces strict schema-on-read for Bronze table)
+#   - [Generates Delta Table]: quarantine_ooni_raw (Captures unparseable corrupt records and invalid event timestamps)
+#   - [Defines Schema Contract]: BRONZE_OONI_SCHEMA (Enforces strict schema-on-read for Bronze table including api_anomaly & api_confirmed)
 #   - [Consuming Modules]: notebooks/02_silver_transformation.py, notebooks/run_pipeline.py
 # Risk & Side Effects:
-#   - Schema modification breaks downstream Silver from_json() unpacking.
+#   - Requires clean re-run of Bronze ingestion to populate api_anomaly & api_confirmed before Silver runs.
+#   - Unparseable timestamps route to quarantine_ooni_raw; synthetic batch_date fallback is strictly prohibited (SILVER-37/SILVER-51).
+#   - Schema modification breaks downstream Silver from_json() unpacking if unaligned.
 #   - Network partition on OONI/GitHub APIs falls back to local samples without crashing; sample barrier rejects production writes across ALL load types (full, backfill, incremental).
 #   - PII Guardrail: Bronze preserves raw probe/resolver IPs for audit provenance, but NEVER prints them to logs.
-#   - Idempotency & Precedence Guarantee: Keyed Delta MERGE INTO with source completeness ranking and 256-bit SHA-2 tie-breaker; unconditional sample data quarantine; gated empty-partition purge requiring verified scope contract.
+#   - Idempotency & Raw Immutability Guarantee: Keyed insert-only Delta MERGE INTO (whenNotMatchedInsertAll) strictly preserves raw physical measurements with zero false update write amplification (SILVER-49); unconditional sample data quarantine; gated empty-partition purge requiring verified scope contract.
 # ==============================================================================
 
 """
@@ -60,7 +62,7 @@ try:
         col, lit, current_timestamp,
         to_date, to_timestamp, substring, coalesce, when,
         count, collect_set, row_number, hash as spark_hash,
-        sha2, concat_ws
+        sha2, concat_ws, struct, to_json
     )
     from pyspark.sql.window import Window
     from pyspark.sql.types import (
@@ -156,7 +158,10 @@ class IngestionManifest:
         Enforces internal invariants before any write operation is permitted.
         Raises ValueError if the manifest contains inconsistent or contradictory metadata.
         """
-        valid_statuses = {"SUCCESS", "GENUINELY_EMPTY", "PARTIAL_FAILURE", "NETWORK_ERROR"}
+        valid_statuses = {
+            "SUCCESS", "GENUINELY_EMPTY", "PARTIAL_FAILURE",
+            "NETWORK_ERROR", "SUCCESS_CAPPED", "CAPPED", "PARTIAL_PAYLOAD_FAILURE"
+        }
         if self.status not in valid_statuses:
             raise ValueError(f"[Manifest Invalid] Unknown status '{self.status}'. Must be one of {valid_statuses}")
 
@@ -182,6 +187,12 @@ class IngestionManifest:
             if self.fetched_records <= 0:
                 raise ValueError("[Manifest Invariant Violation] status='SUCCESS' requires fetched_records > 0.")
 
+        if self.status in ("SUCCESS_CAPPED", "CAPPED"):
+            if self.is_complete:
+                raise ValueError(f"[Manifest Invariant Violation] status='{self.status}' cannot have is_complete=True.")
+            if self.fetched_records <= 0:
+                raise ValueError(f"[Manifest Invariant Violation] status='{self.status}' requires fetched_records > 0.")
+
         if self.status == "GENUINELY_EMPTY":
             if not self.is_complete:
                 raise ValueError("[Manifest Invariant Violation] status='GENUINELY_EMPTY' requires is_complete=True.")
@@ -190,7 +201,7 @@ class IngestionManifest:
             if not self.confirmed_empty_dates:
                 raise ValueError("[Manifest Invariant Violation] status='GENUINELY_EMPTY' requires at least one confirmed_empty_date.")
 
-        if self.status in ("PARTIAL_FAILURE", "NETWORK_ERROR"):
+        if self.status in ("PARTIAL_FAILURE", "NETWORK_ERROR", "PARTIAL_PAYLOAD_FAILURE"):
             if self.is_complete:
                 raise ValueError(f"[Manifest Invariant Violation] status='{self.status}' cannot have is_complete=True.")
 
@@ -426,6 +437,7 @@ CITIZENLAB_REFERENCE_SCHEMA = StructType([
     StructField("category_code",        StringType(), False),
     StructField("category_description", StringType(), True),
     StructField("country_code",         StringType(), False),
+    StructField("taxonomy_version",     StringType(), False),
     StructField("load_timestamp",       TimestampType(), False),
     StructField("_source_url",          StringType(), False)
 ])
@@ -434,7 +446,8 @@ CITIZENLAB_REFERENCE_SCHEMA = StructType([
 def ingest_citizenlab_taxonomy(
     spark: Optional[SparkSession] = None,
     country_code: str = "PK",
-    force_refresh: bool = False
+    force_refresh: bool = False,
+    taxonomy_version: Optional[str] = None
 ) -> str:
     """
     Downloads Citizen Lab URL test categories directly from GitHub REST/HTTPS endpoint
@@ -442,10 +455,12 @@ def ingest_citizenlab_taxonomy(
     
     Teacher Mandate Compliance: 100% automated via code, zero manual file uploads.
     Engineering Contract Compliance: Stored in /reference/, strictly isolated from Bronze.
+    Reproducibility & Lineage: Attaches pinned/configurable 'taxonomy_version' (SILVER-44, SILVER-46).
     """
     resolved_spark = resolve_spark_session(spark)
     ref_table_path = config.PATHS["reference"]
     http_session = create_resilient_http_session()
+    taxonomy_version_str = taxonomy_version or getattr(config, "CITIZEN_LAB_COMMIT_SHA", "commit-841804b")
 
     # Determine whether table already exists and if refresh is needed
     try:
@@ -504,6 +519,7 @@ def ingest_citizenlab_taxonomy(
                 "category_code": row.get("category_code", "MISC").strip().upper(),
                 "category_description": row.get("category_description", "").strip(),
                 "country_code": country_code.upper() if list_scope != "global" else "GLOBAL",
+                "taxonomy_version": taxonomy_version_str,
                 "load_timestamp": now_ts,
                 "_source_url": url
             })
@@ -537,6 +553,7 @@ def fetch_raw_ooni_telemetry(
     country_code: str = "PK",
     max_records: int = 1000,
     test_name: str = "web_connectivity",
+    lookback_days: int = 0,
     return_manifest: bool = False,
     force_refresh: bool = False
 ) -> Union[str, Tuple[str, IngestionManifest]]:
@@ -549,6 +566,7 @@ def fetch_raw_ooni_telemetry(
       - Resilient HTTP: Retries on 429 (rate limits) and 5xx errors.
       - Atomic write: Writes to temporary file then renames to avoid partial corrupt files.
       - Authoritative Manifest Sidecar: Persists IngestionManifest metadata proving fetch outcome.
+      - Rolling Lookback Window: Captures late-arriving measurements [T-lookback .. T] (SILVER-19).
       - Genuinely Empty Detection: Distinguishes zero-measurement dates from API failures.
       - Offline fallback: Switches to local sample data ONLY on API failure, marking is_sample_fallback=True.
     
@@ -563,12 +581,21 @@ def fetch_raw_ooni_telemetry(
         raise ValueError("[Raw Landing Error] test_name cannot be empty.")
 
     try:
-        dt_start = datetime.strptime(batch_date, "%Y-%m-%d")
-        dt_end = dt_start + timedelta(days=1)
+        dt_target = datetime.strptime(batch_date, "%Y-%m-%d")
+        safe_lookback = max(0, int(lookback_days or 0))
+        dt_start = dt_target - timedelta(days=safe_lookback)
+        dt_end = dt_target + timedelta(days=1)
         since_str = dt_start.strftime("%Y-%m-%d")
         until_str = dt_end.strftime("%Y-%m-%d")
     except ValueError:
         raise ValueError(f"[Raw Landing Error] Invalid batch_date '{batch_date}'. Must be in YYYY-MM-DD format.")
+
+    # Calculate full list of dates in the requested window [dt_start .. dt_target]
+    num_days = (dt_target - dt_start).days + 1
+    requested_window_dates = [
+        (dt_start + timedelta(days=i)).strftime("%Y-%m-%d")
+        for i in range(num_days)
+    ]
 
     landing_base_dir = config.PATHS["raw_landing"]
     target_partition_dir = f"{landing_base_dir}/{batch_date.replace('-', '')}"
@@ -619,7 +646,8 @@ def fetch_raw_ooni_telemetry(
         "test_name": clean_test,
         "since": since_str,
         "until": until_str,
-        "limit": page_limit
+        "limit": page_limit,
+        "lookback_days": safe_lookback
     }
     params: Optional[Dict[str, Any]] = dict(query_params_record)
 
@@ -678,9 +706,13 @@ def fetch_raw_ooni_telemetry(
                     r = http_session.get(raw_url, timeout=config.API_REQUEST_TIMEOUT_SECONDS)
                     if r.status_code == 200:
                         payload = r.json()
-                        # Inject measurement_uid if absent
+                        # Inject Stage 1 metadata into payload (SILVER-45)
                         if "measurement_uid" not in payload and item.get("measurement_uid"):
                             payload["measurement_uid"] = item.get("measurement_uid")
+                        if "api_anomaly" not in payload:
+                            payload["api_anomaly"] = item.get("anomaly")
+                        if "api_confirmed" not in payload:
+                            payload["api_confirmed"] = item.get("confirmed")
                         # Stringify polymorphic dictionary fields for the Bronze schema contract
                         for field_name in ("test_keys", "annotations", "test_helpers", "extensions"):
                             if field_name in payload and isinstance(payload[field_name], (dict, list)):
@@ -711,8 +743,10 @@ def fetch_raw_ooni_telemetry(
         if os.path.exists(sample_path):
             with open(sample_path, "r", encoding="utf-8") as f:
                 raw_sample = json.load(f)
-            # Ensure polymorphic dictionary fields are stringified for the Bronze schema contract
+            # Ensure polymorphic dictionary fields are stringified and fallback defaults populated (SILVER-45)
             for rec in raw_sample:
+                rec.setdefault("api_anomaly", False)
+                rec.setdefault("api_confirmed", False)
                 for field_name in ("test_keys", "annotations", "test_helpers", "extensions"):
                     if field_name in rec and isinstance(rec[field_name], (dict, list)):
                         rec[field_name] = json.dumps(rec[field_name])
@@ -724,14 +758,29 @@ def fetch_raw_ooni_telemetry(
                 f"[Raw Landing Error] Neither live OONI API nor local sample fallback ({sample_path}) could provide telemetry."
             )
 
-    # Determine status & completeness
+    # Determine status & completeness (SILVER-36, SILVER-50)
+    # A batch is capped if the pagination loop hit max_records while more pages were available (next_url is not None)
+    is_capped = (len(index_items) >= max_records and next_url is not None)
+    has_omitted_payloads = (len(index_items) > 0 and len(fetched_records) < len(index_items))
+
     if is_sample_fallback:
         manifest_status = "PARTIAL_FAILURE"
         is_complete = False
     elif genuinely_empty:
         manifest_status = "GENUINELY_EMPTY"
         is_complete = True
-    elif api_success:
+    elif fetch_error is not None and len(fetched_records) == 0:
+        manifest_status = "NETWORK_ERROR"
+        is_complete = False
+    elif is_capped:
+        manifest_status = "SUCCESS_CAPPED"
+        is_complete = False  # NEVER permit destructive replaceWhere on capped batches
+        print(f"[Raw Landing Guard] Batch capped at max_records={max_records} with more records available. is_complete=False enforced.")
+    elif has_omitted_payloads:
+        manifest_status = "PARTIAL_PAYLOAD_FAILURE"
+        is_complete = False
+        print(f"[Raw Landing Guard] Resolved {len(fetched_records)}/{len(index_items)} payloads. is_complete=False enforced.")
+    elif api_success and not next_url:
         manifest_status = "SUCCESS"
         is_complete = True
     else:
@@ -759,9 +808,9 @@ def fetch_raw_ooni_telemetry(
         is_complete=is_complete,
         status=manifest_status,
         fetch_timestamp=datetime.now(timezone.utc).isoformat(),
-        authorized_replacement_dates=[batch_date],
-        requested_dates=[batch_date],
-        confirmed_empty_dates=[batch_date] if genuinely_empty else [],
+        authorized_replacement_dates=requested_window_dates,
+        requested_dates=requested_window_dates,
+        confirmed_empty_dates=requested_window_dates if genuinely_empty else [],
         is_sample_fallback=is_sample_fallback,
         error_message=fetch_error,
         page_count=max(1, page_count),
@@ -833,6 +882,9 @@ BRONZE_OONI_SCHEMA = StructType([
     StructField("data_format_version",    StringType(), True),   # OONI data format spec version
     StructField("annotations",            StringType(), True),   # Probe platform/architecture metadata
     StructField("test_helpers",           StringType(), True),   # Backend helper endpoints
+    StructField("api_anomaly",            BooleanType(), True),  # Raw anomaly flag asserted by OONI API metadata (SILVER-45)
+    StructField("api_confirmed",          BooleanType(), True),  # Raw confirmed censorship flag asserted by OONI API metadata (SILVER-45)
+    StructField("extensions",             StringType(), True),   # Optional extensions JSON payload
     StructField("test_keys",              StringType(), True),   # Polymorphic payload stored as raw JSON string
     StructField("_corrupt_record",        StringType(), True)    # PERMISSIVE mode corrupt record trap
 ])
@@ -990,20 +1042,21 @@ def stage_bronze_dataframe(
 ) -> DataFrame:
     """
     Attaches audit lineage columns and derives the physical partition key
-    'measurement_date' with fallback protection against non-standard ISO timestamps.
+    'measurement_date' with strict multi-format ISO timestamp parsing.
+    Invalid or unparseable timestamps evaluate to NULL without synthetic fallback (SILVER-37, SILVER-51).
     """
     if not HAS_PYSPARK:
         raise RuntimeError("[01_bronze_ingestion] PySpark is required for staging DataFrame.")
 
     source_file_expr = lit(source_provenance)
 
-    # Multi-format parsing prevents silent null drops flagged in adversarial review
+    # Multi-format parsing handles standard and ISO formats.
+    # Synthetic batch_date fallback is strictly removed to prevent masking corrupt timestamps (SILVER-37/SILVER-51).
     measurement_date_expr = coalesce(
         to_date(to_timestamp(col("measurement_start_time"), "yyyy-MM-dd HH:mm:ss")),
         to_date(to_timestamp(col("measurement_start_time"), "yyyy-MM-dd'T'HH:mm:ss'Z'")),
         to_date(to_timestamp(col("measurement_start_time"), "yyyy-MM-dd'T'HH:mm:ss")),
-        to_date(substring(col("measurement_start_time"), 1, 10), "yyyy-MM-dd"),
-        to_date(lit(batch_date), "yyyy-MM-dd")
+        to_date(substring(col("measurement_start_time"), 1, 10), "yyyy-MM-dd")
     )
 
     return df_valid.withColumns({
@@ -1012,6 +1065,54 @@ def stage_bronze_dataframe(
         "_batch_id": lit(batch_id),
         "measurement_date": measurement_date_expr,
     })
+
+
+def quarantine_invalid_timestamp_records(
+    spark: SparkSession,
+    df_staged: DataFrame,
+    batch_id: str,
+    quarantine_path: Optional[str] = None
+) -> Tuple[DataFrame, int]:
+    """
+    Filters out records where 'measurement_date' or 'report_id' is NULL and diverts
+    them to the quarantine Delta table ('quarantine_ooni_raw') with descriptive failure reasons.
+    Prevents invalid timestamps from masking into valid partitions or crashing the pipeline (SILVER-37/SILVER-51).
+    """
+    if not HAS_PYSPARK:
+        raise RuntimeError("[01_bronze_ingestion] PySpark is required for quarantine routing.")
+
+    target_quarantine = quarantine_path or config.PATHS["quarantine"]
+
+    is_invalid_cond = col("measurement_date").isNull() | col("report_id").isNull()
+    df_corrupt = df_staged.filter(is_invalid_cond)
+    quarantine_count = df_corrupt.count()
+
+    if quarantine_count > 0:
+        print(f"[Quarantine Router] Diverting {quarantine_count} invalid records (corrupt timestamp/report_id) to: {target_quarantine}")
+        reason_expr = (
+            when(col("measurement_date").isNull() & col("report_id").isNull(), lit("INVALID_TIMESTAMP_AND_NULL_REPORT_ID"))
+            .when(col("measurement_date").isNull(), lit("INVALID_MEASUREMENT_TIMESTAMP"))
+            .otherwise(lit("NULL_REPORT_ID"))
+        )
+
+        df_quarantine_staged = df_corrupt.select(
+            to_json(struct("*")).alias("raw_record"),
+            coalesce(col("_source_file"), lit("STAGED_BRONZE")).alias("_source_file"),
+            lit(batch_id).alias("_batch_id"),
+            current_timestamp().alias("quarantine_timestamp"),
+            reason_expr.alias("quarantine_reason")
+        )
+
+        (
+            df_quarantine_staged.write
+            .format("delta")
+            .mode("append")
+            .save(target_quarantine)
+        )
+        print(f"[Quarantine Router] Successfully recorded {quarantine_count} quarantined records.")
+
+    df_clean = df_staged.filter(~is_invalid_cond)
+    return df_clean, quarantine_count
 
 
 def derive_authoritative_date_scope(df: DataFrame) -> List[str]:
@@ -1279,23 +1380,15 @@ def write_bronze_delta_table(
             "AND target.input <=> source.input"
         )
 
+        # Invariant (SILVER-49 & Medallion §2.1): Raw Bronze measurements are strictly immutable.
+        # Once landed, raw physical observations are never updated simply because a new execution run
+        # generated a different _batch_id UUID. Using insert-only MERGE INTO (whenNotMatchedInsertAll)
+        # provides true deduplication idempotency with zero write amplification and zero parquet rewrites.
         merge_builder = (
             delta_target.alias("target")
             .merge(
                 source=df_source_dedup.alias("source"),
                 condition=merge_condition
-            )
-            .whenMatchedUpdate(
-                condition="target._batch_id != source._batch_id",
-                set={
-                    "load_timestamp": "current_timestamp()",
-                    "_batch_id": "source._batch_id",
-                    "_source_file": "source._source_file",
-                    "test_keys": "source.test_keys",
-                    "annotations": "source.annotations",
-                    "probe_ip": "source.probe_ip",
-                    "resolver_ip": "source.resolver_ip"
-                }
             )
             .whenNotMatchedInsertAll()
         )
@@ -1444,6 +1537,7 @@ def ingest_raw_to_bronze(
                 batch_date=params["batch_date"],
                 country_code=params["country_code"],
                 max_records=params["max_records"],
+                lookback_days=params["lookback_days"],
                 return_manifest=True,
                 force_refresh=force_refresh_telemetry
             )
@@ -1488,8 +1582,8 @@ def ingest_raw_to_bronze(
         else:
             active_manifest.fetched_records = total_rows_read
 
-        # Step 3B: Route corrupt records to quarantine table
-        df_valid, quarantine_count = process_and_quarantine_corrupt_records(
+        # Step 3B: Route corrupt records to quarantine table (JSON syntax parse violations)
+        df_valid, json_quarantine_count = process_and_quarantine_corrupt_records(
             spark=resolved_spark,
             df_raw=df_raw,
             batch_id=params["batch_id"],
@@ -1504,10 +1598,19 @@ def ingest_raw_to_bronze(
             source_provenance=source_label
         )
 
+        # Step 3C.1: Route invalid timestamps / keys to quarantine (SILVER-37 / SILVER-51)
+        df_clean_bronze, timestamp_quarantine_count = quarantine_invalid_timestamp_records(
+            spark=resolved_spark,
+            df_staged=df_bronze_staged,
+            batch_id=params["batch_id"],
+            quarantine_path=target_quarantine_path
+        )
+        total_quarantine_count = json_quarantine_count + timestamp_quarantine_count
+
         # Step 3D: Persist to Bronze Delta Lake with atomic isolation & manifest contract
         write_metrics = write_bronze_delta_table(
             spark=resolved_spark,
-            df_bronze=df_bronze_staged,
+            df_bronze=df_clean_bronze,
             batch_date=params["batch_date"],
             country_code=params["country_code"],
             load_type=params["load_type"],
@@ -1523,7 +1626,7 @@ def ingest_raw_to_bronze(
             rows_read=total_rows_read,
             rows_inserted=write_metrics["rows_inserted"],
             rows_updated=write_metrics["rows_updated"],
-            rows_quarantined=quarantine_count
+            rows_quarantined=total_quarantine_count
         )
 
     return {
@@ -1534,10 +1637,10 @@ def ingest_raw_to_bronze(
         "rows_read": total_rows_read,
         "rows_inserted": write_metrics["rows_inserted"],
         "rows_updated": write_metrics["rows_updated"],
-        "rows_quarantined": quarantine_count,
+        "rows_quarantined": total_quarantine_count,
         "bronze_path": target_bronze_path,
         "quarantine_path": target_quarantine_path,
-        "status": "Success" if quarantine_count == 0 else "Partial_Quarantine"
+        "status": "Success" if total_quarantine_count == 0 else "Partial_Quarantine"
     }
 
 
@@ -1579,7 +1682,8 @@ if __name__ == "__main__":
     staged_dir = fetch_raw_ooni_telemetry(
         batch_date=params["batch_date"],
         country_code=params["country_code"],
-        max_records=params["max_records"]
+        max_records=params["max_records"],
+        lookback_days=params["lookback_days"]
     )
     print(f"  * Staged Telemetry Dir : {staged_dir}")
 

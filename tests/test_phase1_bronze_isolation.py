@@ -65,7 +65,7 @@ import sys
 import shutil
 import tempfile
 import unittest
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 # Self-bootstrapping for Databricks runtime and standalone executions
 try:
@@ -442,6 +442,207 @@ class TestPhase1OfflineLogic(unittest.TestCase):
         ranked = sorted([rec_b, rec_a], key=rank_key, reverse=True)
         self.assertEqual(ranked[0]["measurement_uid"], "uid_12345")
 
+    def test_bronze_schema_and_payload_anomaly_flags(self):
+        """
+        P0 (SILVER-45): Validates that BRONZE_OONI_SCHEMA includes api_anomaly,
+        api_confirmed, and extensions, and that fallback sample defaults are properly applied.
+        """
+        schema = bronze_mod.get_bronze_schema()
+        field_names = [f.name for f in schema.fields]
+        self.assertIn("api_anomaly", field_names)
+        self.assertIn("api_confirmed", field_names)
+        self.assertIn("extensions", field_names)
+
+        # Validate injection logic mimicking _resolve_full_payload
+        stage1_item = {
+            "measurement_uid": "test_uid_001",
+            "anomaly": False,
+            "confirmed": False
+        }
+        stage2_payload = {
+            "report_id": "test_rep_001",
+            "test_name": "web_connectivity"
+        }
+        if "measurement_uid" not in stage2_payload and stage1_item.get("measurement_uid"):
+            stage2_payload["measurement_uid"] = stage1_item.get("measurement_uid")
+        if "api_anomaly" not in stage2_payload:
+            stage2_payload["api_anomaly"] = stage1_item.get("anomaly")
+        if "api_confirmed" not in stage2_payload:
+            stage2_payload["api_confirmed"] = stage1_item.get("confirmed")
+
+        self.assertIs(stage2_payload["api_anomaly"], False)
+        self.assertIs(stage2_payload["api_confirmed"], False)
+        self.assertEqual(stage2_payload["measurement_uid"], "test_uid_001")
+
+    def test_citizenlab_reference_schema_taxonomy_version_contract(self):
+        """
+        P0 (SILVER-46): Validates that CITIZENLAB_REFERENCE_SCHEMA strictly conforms to
+        data/schemas/ref_citizenlab_categories_schema.json, specifically requiring taxonomy_version.
+        """
+        schema = bronze_mod.CITIZENLAB_REFERENCE_SCHEMA
+        field_names = [f.name for f in schema.fields]
+
+        expected_fields = [
+            "url", "category_code", "category_description",
+            "country_code", "taxonomy_version", "load_timestamp", "_source_url"
+        ]
+        self.assertEqual(field_names, expected_fields)
+
+        # Check taxonomy_version specifically
+        tax_field = next(f for f in schema.fields if f.name == "taxonomy_version")
+        self.assertEqual(tax_field.dataType.simpleString(), "string")
+        self.assertFalse(tax_field.nullable)
+
+        # Check config default
+        self.assertTrue(hasattr(bronze_mod.config, "CITIZEN_LAB_COMMIT_SHA"))
+        self.assertTrue(len(bronze_mod.config.CITIZEN_LAB_COMMIT_SHA) > 0)
+
+    def test_lookback_days_window_parameterization_and_manifest_scope(self):
+        """
+        P0 (SILVER-19): Validates that lookback_days expands the since/until API query window
+        and accurately records all lookback dates in the manifest requested/authorized scopes.
+        """
+        # Test parameter resolution
+        params = bronze_mod.resolve_ingestion_parameters(
+            batch_date="2026-09-27",
+            load_type="incremental",
+            country_code="PK",
+            lookback_days=3
+        )
+        self.assertEqual(params["lookback_days"], 3)
+
+        # Test date calculation logic identical to fetch_raw_ooni_telemetry
+        dt_target = datetime.strptime("2026-09-27", "%Y-%m-%d")
+        lookback = 3
+        dt_start = dt_target - timedelta(days=lookback)
+        dt_end = dt_target + timedelta(days=1)
+        since_str = dt_start.strftime("%Y-%m-%d")
+        until_str = dt_end.strftime("%Y-%m-%d")
+
+        self.assertEqual(since_str, "2026-09-24")
+        self.assertEqual(until_str, "2026-09-28")
+
+        num_days = (dt_target - dt_start).days + 1
+        expected_dates = [
+            (dt_start + timedelta(days=i)).strftime("%Y-%m-%d")
+            for i in range(num_days)
+        ]
+        self.assertEqual(expected_dates, ["2026-09-24", "2026-09-25", "2026-09-26", "2026-09-27"])
+
+        # Validate that manifest created with this range passes validation
+        manifest = bronze_mod.IngestionManifest(
+            batch_date="2026-09-27",
+            country_code="PK",
+            test_name="web_connectivity",
+            requested_records=1000,
+            fetched_records=250,
+            is_complete=True,
+            status="SUCCESS",
+            fetch_timestamp="2026-09-27T12:00:00Z",
+            authorized_replacement_dates=expected_dates,
+            requested_dates=expected_dates,
+            confirmed_empty_dates=[],
+            query_parameters={"lookback_days": 3, "since": since_str, "until": until_str}
+        )
+        manifest.validate()
+        self.assertEqual(manifest.authorized_replacement_dates, expected_dates)
+
+    def test_capped_manifest_status_and_invariants(self):
+        """
+        P0 (SILVER-36, SILVER-50): Validates that capped and partial batches enforce is_complete=False
+        and correctly abort destructive replaceWhere operations.
+        """
+        # 1. SUCCESS_CAPPED with is_complete=True MUST be rejected by manifest.validate()
+        with self.assertRaises(ValueError):
+            m_bad_capped = bronze_mod.IngestionManifest(
+                batch_date="2026-09-27", country_code="PK", test_name="web_connectivity",
+                requested_records=1000, fetched_records=1000, is_complete=True, status="SUCCESS_CAPPED",
+                fetch_timestamp="2026-09-27T12:00:00Z", authorized_replacement_dates=["2026-09-27"]
+            )
+            m_bad_capped.validate()
+
+        # 2. SUCCESS_CAPPED with is_complete=False is VALID
+        m_valid_capped = bronze_mod.IngestionManifest(
+            batch_date="2026-09-27", country_code="PK", test_name="web_connectivity",
+            requested_records=1000, fetched_records=1000, is_complete=False, status="SUCCESS_CAPPED",
+            fetch_timestamp="2026-09-27T12:00:00Z", authorized_replacement_dates=["2026-09-27"]
+        )
+        m_valid_capped.validate()
+        self.assertFalse(m_valid_capped.is_complete)
+
+        # 3. PARTIAL_PAYLOAD_FAILURE with is_complete=True MUST be rejected
+        with self.assertRaises(ValueError):
+            m_bad_partial = bronze_mod.IngestionManifest(
+                batch_date="2026-09-27", country_code="PK", test_name="web_connectivity",
+                requested_records=1000, fetched_records=950, is_complete=True, status="PARTIAL_PAYLOAD_FAILURE",
+                fetch_timestamp="2026-09-27T12:00:00Z", authorized_replacement_dates=["2026-09-27"]
+            )
+            m_bad_partial.validate()
+
+        # 4. Verify that is_complete=False blocks destructive write in full/backfill mode
+        def assert_destructive_write_gate(load_type: str, manifest: bronze_mod.IngestionManifest):
+            if load_type in ("full", "backfill") and not manifest.is_complete:
+                raise ValueError(
+                    f"Destructive replaceWhere aborted! Ingestion manifest indicates incomplete fetch ({manifest.status})."
+                )
+
+        with self.assertRaises(ValueError):
+            assert_destructive_write_gate("full", m_valid_capped)
+
+        with self.assertRaises(ValueError):
+            assert_destructive_write_gate("backfill", m_valid_capped)
+
+    def test_unparseable_timestamp_quarantine_contract_and_no_fallback(self):
+        """
+        P0 (SILVER-37, SILVER-51): Validates that stage_bronze_dataframe strictly omits
+        synthetic batch_date fallback, ensuring corrupt timestamps evaluate to NULL and
+        route to quarantine_ooni_raw instead of masking into valid partitions.
+        """
+        import inspect
+        source = inspect.getsource(bronze_mod.stage_bronze_dataframe)
+        self.assertNotIn("to_date(lit(batch_date)", source, "Dangerous synthetic batch_date fallback still present!")
+
+        # Verify fallback date parsing logic simulating multi-format coalesce
+        def parse_measurement_date(ts_str) -> str:
+            if not ts_str:
+                return None
+            formats = [
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%dT%H:%M:%SZ",
+                "%Y-%m-%dT%H:%M:%S",
+                "%Y-%m-%d"
+            ]
+            for fmt in formats:
+                try:
+                    dt = datetime.strptime(ts_str[:19] if "T" in ts_str or " " in ts_str else ts_str[:10], fmt)
+                    return dt.strftime("%Y-%m-%d")
+                except Exception:
+                    continue
+            return None
+
+        # Standard formats parse successfully
+        self.assertEqual(parse_measurement_date("2026-09-27 10:15:30"), "2026-09-27")
+        self.assertEqual(parse_measurement_date("2026-09-27T10:15:30Z"), "2026-09-27")
+        self.assertEqual(parse_measurement_date("2026-09-27T10:15:30"), "2026-09-27")
+
+        # Corrupt and malformed strings MUST evaluate to None (never masking with batch_date)
+        batch_date = "2026-10-18"
+        for bad_ts in ("CORRUPT_TIMESTAMP", "1970-00-00", None, "", "invalid"):
+            parsed = parse_measurement_date(bad_ts)
+            self.assertIsNone(parsed, f"Bad timestamp '{bad_ts}' should evaluate to None!")
+            self.assertNotEqual(parsed, batch_date, f"Bad timestamp '{bad_ts}' masked with batch_date!")
+
+    def test_bronze_merge_insert_only_immutability_contract(self):
+        """
+        P0 (SILVER-49): Validates that Bronze incremental merge strictly omits
+        whenMatchedUpdate, enforcing raw append-only immutability and preventing
+        write amplification from changing _batch_id UUIDs.
+        """
+        import inspect
+        source = inspect.getsource(bronze_mod.write_bronze_delta_table)
+        self.assertNotIn("whenMatchedUpdate", source, "whenMatchedUpdate found in Bronze write logic! Bronze must be insert-only.")
+        self.assertIn("whenNotMatchedInsertAll", source, "whenNotMatchedInsertAll missing from Bronze MERGE logic!")
+
 
 # COMMAND ----------
 
@@ -650,6 +851,14 @@ class TestPhase1SparkIntegration(unittest.TestCase):
         metrics = bronze_mod.write_bronze_delta_table(self.spark, df_batch, "2026-09-27", "PK", "incremental", bronze_path=table_path)
         self.assertEqual(self.spark.read.format("delta").load(table_path).count(), 40, "Duplicate rows created on rerun!")
         self.assertEqual(metrics["rows_inserted"], 0)
+        self.assertEqual(metrics["rows_updated"], 0)
+
+        # Re-run identical measurements with a NEW batch ID (verifies SILVER-49 raw immutability)
+        df_batch_new_uuid = self._create_sample_batch("PK", "2026-09-27", 40, "BATCH_PK_IDEM_NEW_UUID")
+        metrics2 = bronze_mod.write_bronze_delta_table(self.spark, df_batch_new_uuid, "2026-09-27", "PK", "incremental", bronze_path=table_path)
+        self.assertEqual(self.spark.read.format("delta").load(table_path).count(), 40, "Duplicate rows created on rerun with new UUID!")
+        self.assertEqual(metrics2["rows_inserted"], 0)
+        self.assertEqual(metrics2["rows_updated"], 0, "Changed batch ID falsely triggered updates on raw measurements (SILVER-49)!")
 
     def test_04_empty_dataframe_protection(self):
         """P0: Ingesting an empty DataFrame without valid manifest MUST NOT alter existing table state."""

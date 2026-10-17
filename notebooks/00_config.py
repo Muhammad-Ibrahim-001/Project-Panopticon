@@ -93,6 +93,7 @@ OONI_RAW_MEASUREMENT_ENDPOINT: str = f"{OONI_API_BASE_URL}/raw_measurement"
 CITIZEN_LAB_RAW_BASE_URL: str = (
     "https://raw.githubusercontent.com/citizenlab/test-lists/master/lists"
 )
+CITIZEN_LAB_COMMIT_SHA: str = "commit-841804b"  # Pinned Citizen Lab commit for longitudinal reproducibility (SILVER-44, SILVER-46)
 
 # AWS Open Data Public Gateway (Optional direct S3 HTTPS fallback)
 OONI_S3_PUBLIC_GATEWAY: str = "https://ooni-data-eu-fra.s3.eu-central-1.amazonaws.com"
@@ -234,6 +235,7 @@ if __name__ == "__main__":
     print(f" Default Test      : {DEFAULT_TEST}")
     print(f" OONI API Endpoint : {OONI_MEASUREMENTS_ENDPOINT}")
     print(f" Citizen Lab URL   : {CITIZEN_LAB_RAW_BASE_URL}")
+    print(f" Citizen Lab Commit: {CITIZEN_LAB_COMMIT_SHA}")
     print("\nStorage Paths:")
     for tier, path in PATHS.items():
         print(f"  - {tier:<14}: {path}")
