@@ -1334,24 +1334,19 @@ def write_bronze_delta_table(
     df_ranked = df_bronze.withColumn("_panopticon_rank", row_number().over(window_spec))
     df_source_dedup = df_ranked.filter(col("_panopticon_rank") == 1).drop("_panopticon_rank")
 
-    # Check table existence across both DBFS and Unity Catalog Volume paths
+    # Check table existence across DBFS, Unity Catalog Volumes, and Local FS
     table_exists = False
     try:
-        table_exists = DeltaTable.isDeltaTable(spark, target_bronze)
+        # Native Spark read probe: avoids OS POSIX listdir errors on Serverless Volumes
+        spark.read.format("delta").load(target_bronze).limit(1).take(1)
+        table_exists = True
     except Exception:
-        table_exists = False
-
-    # Fallback probe for Databricks Serverless / Unity Catalog Volumes
-    if not table_exists:
         try:
-            delta_log_dir = os.path.join(target_bronze, "_delta_log")
-            if os.path.exists(delta_log_dir) and len(os.listdir(delta_log_dir)) > 0:
-                table_exists = True
-            else:
-                spark.read.format("delta").load(target_bronze).limit(1).count()
-                table_exists = True
+            table_exists = bool(DeltaTable.isDeltaTable(spark, target_bronze))
         except Exception:
             table_exists = False
+
+    print(f"[Bronze Persistence] Delta table existence check: exists={table_exists} (target: {target_bronze})")
 
     # --------------------------------------------------------------------------
     # SCENARIO A: Initial Table Creation
