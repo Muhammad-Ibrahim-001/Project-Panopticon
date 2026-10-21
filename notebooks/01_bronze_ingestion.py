@@ -1690,6 +1690,13 @@ if __name__ == "__main__":
     except Exception as ref_err:
         print(f"  * Reference Fetch (Spark-dependent): {ref_err}")
 
+    # Ensure __file__ is defined (not available in Databricks notebook context)
+    if "__file__" not in dir():
+        __file__ = "/Workspace/Users/l232556@lhr.nu.edu.pk/Project-Panopticon/notebooks/01_bronze_ingestion"
+
+    # Ensure the UC volume exists before raw landing staging
+    spark.sql("CREATE VOLUME IF NOT EXISTS workspace.default.panopticon")
+
     print("\n[Step 1 Verification B] Testing Raw Landing Staging...")
     staged_dir = fetch_raw_ooni_telemetry(
         batch_date=params["batch_date"],
@@ -1717,7 +1724,8 @@ if __name__ == "__main__":
                 batch_date=params["batch_date"],
                 load_type=params["load_type"],
                 country_code=params["country_code"],
-                max_records=params["max_records"]
+                max_records=params["max_records"],
+                allow_sample_writes=True
             )
             print("\n[Step 3 Verified] Ingestion Pipeline Run Summary:")
             for sk, sv in summary.items():
