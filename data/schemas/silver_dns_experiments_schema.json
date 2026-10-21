@@ -4,118 +4,116 @@
   "type": "struct",
   "fields": [
     {
-      "name": "dns_experiment_id",
+      "name": "query_id",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Primary Key: SHA256 deterministic hash of measurement_id, query_index, and answer_index via posexplode_outer" }
+      "metadata": {
+        "comment": "PK: SHA-256(measurement_id || query_pos)"
+      }
     },
     {
       "name": "measurement_id",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Foreign Key referencing silver_network_measurements.measurement_id" }
+      "metadata": {
+        "comment": "FK to silver_network_measurements"
+      }
     },
     {
       "name": "measurement_date",
       "type": "date",
       "nullable": false,
-      "metadata": { "comment": "Physical partition column (YYYY-MM-DD)" }
-    },
-    {
-      "name": "event_timestamp",
-      "type": "timestamp",
-      "nullable": false,
-      "metadata": { "comment": "Standardized UTC timestamp of measurement start" }
+      "metadata": {
+        "comment": "Partition column"
+      }
     },
     {
       "name": "probe_cc",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "ISO 3166-1 alpha-2 country code" }
+      "metadata": {
+        "comment": "Probe country"
+      }
     },
     {
-      "name": "probe_asn",
-      "type": "long",
-      "nullable": true,
-      "metadata": { "comment": "Autonomous System Number of tester network" }
-    },
-    {
-      "name": "query_name",
-      "type": "string",
+      "name": "query_pos",
+      "type": "integer",
       "nullable": false,
-      "metadata": { "comment": "Queried FQDN hostname" }
+      "metadata": {
+        "comment": "Zero-based position inside test_keys.queries"
+      }
     },
     {
       "name": "query_type",
       "type": "string",
-      "nullable": false,
-      "metadata": { "comment": "DNS record query type (A, AAAA, CNAME, HTTPS)" }
+      "nullable": true,
+      "metadata": {
+        "comment": "A / AAAA / HTTPS ..."
+      }
     },
     {
-      "name": "hashed_resolver_ip",
+      "name": "query_hostname",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Peppered SHA-256 pseudonymized resolver IP (raw resolver_address dropped for privacy)" }
+      "metadata": {
+        "comment": "Hostname queried"
+      }
     },
     {
-      "name": "answer_type",
+      "name": "query_engine",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "DNS answer record type (A, AAAA, CNAME, PTR)" }
+      "metadata": {
+        "comment": "Resolver engine (system/udp/doh...)"
+      }
     },
     {
-      "name": "answer_value",
+      "name": "query_failure",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Returned IP address or CNAME alias target in DNS answer section (supports non-IP answers)" }
+      "metadata": {
+        "comment": "OONI failure string, NULL on success"
+      }
     },
     {
-      "name": "answer_asn",
-      "type": "long",
-      "nullable": true,
-      "metadata": { "comment": "Autonomous system number of resolved answer IP" }
-    },
-    {
-      "name": "answer_as_org_name",
-      "type": "string",
-      "nullable": true,
-      "metadata": { "comment": "Commercial organization / ISP of resolved answer IP" }
-    },
-    {
-      "name": "dns_failure",
-      "type": "string",
-      "nullable": true,
-      "metadata": { "comment": "DNS resolution error code (NXDOMAIN, SERVFAIL, timeout)" }
-    },
-    {
-      "name": "is_bogon",
+      "name": "is_dns_failure",
       "type": "boolean",
       "nullable": false,
-      "metadata": { "comment": "True if answer IP is in RFC 1918 / 5735 / 6598 bogon ranges" }
+      "metadata": {
+        "comment": "True when query_failure is present"
+      }
     },
     {
-      "name": "is_nxdomain",
-      "type": "boolean",
+      "name": "total_answers_count",
+      "type": "integer",
       "nullable": false,
-      "metadata": { "comment": "True if DNS server returned NXDOMAIN non-existent domain" }
+      "metadata": {
+        "comment": "Number of answers"
+      }
     },
     {
-      "name": "dns_tampered",
-      "type": "boolean",
+      "name": "ipv4_answers_count",
+      "type": "integer",
       "nullable": false,
-      "metadata": { "comment": "True if DNS answer is spoofed or blocked" }
+      "metadata": {
+        "comment": "Answers carrying an IPv4 address"
+      }
+    },
+    {
+      "name": "cname_answers_count",
+      "type": "integer",
+      "nullable": false,
+      "metadata": {
+        "comment": "CNAME answers (answer_type CNAME or hostname set)"
+      }
     },
     {
       "name": "load_timestamp",
       "type": "timestamp",
       "nullable": false,
-      "metadata": { "comment": "Audit: UTC timestamp of ingestion into Silver (Course Requirement P2-2d)" }
-    },
-    {
-      "name": "_batch_id",
-      "type": "string",
-      "nullable": false,
-      "metadata": { "comment": "Audit: Processing batch identifier" }
+      "metadata": {
+        "comment": "Audit load time"
+      }
     }
   ]
 }

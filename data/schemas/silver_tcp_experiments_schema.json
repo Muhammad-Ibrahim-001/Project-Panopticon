@@ -4,88 +4,92 @@
   "type": "struct",
   "fields": [
     {
-      "name": "tcp_experiment_id",
+      "name": "tcp_connect_id",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Primary Key: SHA256 deterministic hash of measurement_id, connect_index via posexplode_outer" }
+      "metadata": {
+        "comment": "PK: SHA-256(measurement_id || tcp_pos)"
+      }
     },
     {
       "name": "measurement_id",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Foreign Key referencing silver_network_measurements.measurement_id" }
+      "metadata": {
+        "comment": "FK to silver_network_measurements"
+      }
     },
     {
       "name": "measurement_date",
       "type": "date",
       "nullable": false,
-      "metadata": { "comment": "Physical partition column (YYYY-MM-DD)" }
-    },
-    {
-      "name": "event_timestamp",
-      "type": "timestamp",
-      "nullable": false,
-      "metadata": { "comment": "Standardized UTC timestamp of measurement start" }
+      "metadata": {
+        "comment": "Partition column"
+      }
     },
     {
       "name": "probe_cc",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "ISO 3166-1 alpha-2 country code" }
+      "metadata": {
+        "comment": "Probe country"
+      }
     },
     {
-      "name": "probe_asn",
-      "type": "long",
-      "nullable": true,
-      "metadata": { "comment": "Autonomous System Number of tester network" }
+      "name": "tcp_pos",
+      "type": "integer",
+      "nullable": false,
+      "metadata": {
+        "comment": "Zero-based position inside test_keys.tcp_connect"
+      }
     },
     {
       "name": "destination_ip",
       "type": "string",
-      "nullable": false,
-      "metadata": { "comment": "Remote target endpoint IP" }
+      "nullable": true,
+      "metadata": {
+        "comment": "Target server IP (not a probe/activist address)"
+      }
     },
     {
       "name": "destination_port",
       "type": "integer",
-      "nullable": false,
-      "metadata": { "comment": "Target TCP port (80, 443, etc.)" }
+      "nullable": true,
+      "metadata": {
+        "comment": "Target port"
+      }
     },
     {
-      "name": "connect_success",
+      "name": "is_blocked",
       "type": "boolean",
       "nullable": false,
-      "metadata": { "comment": "True if TCP three-way handshake completed successfully (status.success)" }
+      "metadata": {
+        "comment": "OONI status.blocked"
+      }
     },
     {
-      "name": "connect_blocked",
-      "type": "boolean",
-      "nullable": false,
-      "metadata": { "comment": "True if TCP connection was explicitly blocked or reset (status.blocked)" }
-    },
-    {
-      "name": "connect_failure",
+      "name": "failure_reason",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "TCP error message (connection_refused, connection_reset, tcp_timed_out)" }
+      "metadata": {
+        "comment": "OONI status.failure"
+      }
     },
     {
-      "name": "is_tcp_blocked",
+      "name": "is_success",
       "type": "boolean",
       "nullable": false,
-      "metadata": { "comment": "True if connect_blocked == true or connect_failure == 'connection_reset_by_peer'" }
+      "metadata": {
+        "comment": "OONI status.success"
+      }
     },
     {
       "name": "load_timestamp",
       "type": "timestamp",
       "nullable": false,
-      "metadata": { "comment": "Audit: UTC timestamp of ingestion into Silver (Course Requirement P2-2d)" }
-    },
-    {
-      "name": "_batch_id",
-      "type": "string",
-      "nullable": false,
-      "metadata": { "comment": "Audit: Processing batch identifier" }
+      "metadata": {
+        "comment": "Audit load time"
+      }
     }
   ]
 }

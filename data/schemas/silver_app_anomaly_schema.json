@@ -7,91 +7,169 @@
       "name": "app_measurement_id",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Primary Key: SHA256 deterministic hash of measurement_id, test_name, coalesce(target_endpoint, 'DEFAULT')" }
-    },
-    {
-      "name": "measurement_id",
-      "type": "string",
-      "nullable": false,
-      "metadata": { "comment": "Foreign Key referencing silver_network_measurements.measurement_id" }
+      "metadata": {
+        "comment": "PK = measurement_id of the parent row"
+      }
     },
     {
       "name": "measurement_date",
       "type": "date",
       "nullable": false,
-      "metadata": { "comment": "Physical partition column (YYYY-MM-DD)" }
-    },
-    {
-      "name": "event_timestamp",
-      "type": "timestamp",
-      "nullable": false,
-      "metadata": { "comment": "Standardized UTC timestamp of measurement start" }
+      "metadata": {
+        "comment": "Partition column"
+      }
     },
     {
       "name": "probe_cc",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "ISO 3166-1 alpha-2 country code" }
+      "metadata": {
+        "comment": "Probe country"
+      }
     },
     {
       "name": "probe_asn",
       "type": "long",
-      "nullable": true,
-      "metadata": { "comment": "Autonomous System Number of tester network" }
+      "nullable": false,
+      "metadata": {
+        "comment": "Probe ASN"
+      }
     },
     {
-      "name": "test_name",
+      "name": "app_name",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "App protocol test (whatsapp, telegram, signal, tor, psiphon, echcheck)" }
-    },
-    {
-      "name": "target_endpoint",
-      "type": "string",
-      "nullable": true,
-      "metadata": { "comment": "Target bridge, relay, or bootstrap endpoint" }
-    },
-    {
-      "name": "target_type",
-      "type": "string",
-      "nullable": true,
-      "metadata": { "comment": "Target role (HTTP_REGISTRATION_SERVER, TCP_RELAY, BRIDGE, OR_PORT)" }
-    },
-    {
-      "name": "app_accessible",
-      "type": "boolean",
-      "nullable": true,
-      "metadata": { "comment": "App-specific accessibility verdict" }
-    },
-    {
-      "name": "app_tampering_vector",
-      "type": "string",
-      "nullable": false,
-      "metadata": { "comment": "Attack label: ENDPOINT_BLOCKED, BRIDGE_REACHABILITY_FAILURE, HANDSHAKE_RESET, BENIGN" }
+      "metadata": {
+        "comment": "whatsapp|telegram|signal|tor|psiphon|facebook_messenger"
+      }
     },
     {
       "name": "is_anomaly",
       "type": "boolean",
       "nullable": false,
-      "metadata": { "comment": "Censorship anomaly flag derived from app-specific failure attributes" }
+      "metadata": {
+        "comment": "Same value as the parent row"
+      }
     },
     {
-      "name": "failure_detail",
+      "name": "whatsapp_web_status",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Specific error extracted from app test keys (e.g. Signal failed_operation, Psiphon failure)" }
+      "metadata": {
+        "comment": "whatsapp_web_status"
+      }
+    },
+    {
+      "name": "whatsapp_endpoints_status",
+      "type": "string",
+      "nullable": true,
+      "metadata": {
+        "comment": "whatsapp_endpoints_status"
+      }
+    },
+    {
+      "name": "telegram_http_blocked",
+      "type": "boolean",
+      "nullable": true,
+      "metadata": {
+        "comment": "telegram_http_blocking"
+      }
+    },
+    {
+      "name": "telegram_tcp_blocked",
+      "type": "boolean",
+      "nullable": true,
+      "metadata": {
+        "comment": "telegram_tcp_blocking"
+      }
+    },
+    {
+      "name": "telegram_web_status",
+      "type": "string",
+      "nullable": true,
+      "metadata": {
+        "comment": "telegram_web_status"
+      }
+    },
+    {
+      "name": "signal_backend_status",
+      "type": "string",
+      "nullable": true,
+      "metadata": {
+        "comment": "signal_backend_status"
+      }
+    },
+    {
+      "name": "facebook_tcp_blocking",
+      "type": "boolean",
+      "nullable": true,
+      "metadata": {
+        "comment": "facebook_tcp_blocking"
+      }
+    },
+    {
+      "name": "facebook_dns_blocking",
+      "type": "boolean",
+      "nullable": true,
+      "metadata": {
+        "comment": "facebook_dns_blocking"
+      }
+    },
+    {
+      "name": "tor_dir_port_accessible",
+      "type": "integer",
+      "nullable": true,
+      "metadata": {
+        "comment": "Tor directory ports reachable"
+      }
+    },
+    {
+      "name": "tor_dir_port_total",
+      "type": "integer",
+      "nullable": true,
+      "metadata": {
+        "comment": "Tor directory ports tested"
+      }
+    },
+    {
+      "name": "tor_obfs4_accessible",
+      "type": "integer",
+      "nullable": true,
+      "metadata": {
+        "comment": "obfs4 bridges reachable"
+      }
+    },
+    {
+      "name": "tor_obfs4_total",
+      "type": "integer",
+      "nullable": true,
+      "metadata": {
+        "comment": "obfs4 bridges tested"
+      }
+    },
+    {
+      "name": "psiphon_bootstrap_time",
+      "type": "double",
+      "nullable": true,
+      "metadata": {
+        "comment": "Psiphon bootstrap time in seconds"
+      }
+    },
+    {
+      "name": "app_failure",
+      "type": "string",
+      "nullable": true,
+      "metadata": {
+        "comment": "Generic test_keys.failure"
+      }
     },
     {
       "name": "load_timestamp",
       "type": "timestamp",
       "nullable": false,
-      "metadata": { "comment": "Audit: UTC timestamp of ingestion into Silver (Course Requirement P2-2d)" }
-    },
-    {
-      "name": "_batch_id",
-      "type": "string",
-      "nullable": false,
-      "metadata": { "comment": "Audit: Processing batch identifier" }
+      "metadata": {
+        "comment": "Audit load time"
+      }
     }
   ]
 }

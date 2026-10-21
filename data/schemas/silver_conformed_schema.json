@@ -7,13 +7,7 @@
       "name": "measurement_id",
       "type": "string",
       "nullable": false,
-      "metadata": { "comment": "Primary Key: coalesce(measurement_uid, sha2(concat_ws('||', probe_cc, measurement_date, report_id, measurement_start_time, test_name, coalesce(input, 'NO_INPUT')), 256))" }
-    },
-    {
-      "name": "measurement_uid",
-      "type": "string",
-      "nullable": true,
-      "metadata": { "comment": "Optional upstream OONI measurement UUID from API metadata" }
+      "metadata": { "comment": "PK: OONI measurement_uid when present, else length-prefixed SHA-256 of the 6 Bronze natural-key parts" }
     },
     {
       "name": "report_id",
@@ -64,10 +58,16 @@
       "metadata": { "comment": "Normalized telecom provider / ISP name" }
     },
     {
+      "name": "masked_probe_subnet",
+      "type": "string",
+      "nullable": true,
+      "metadata": { "comment": "/24 (IPv4) or /48 (IPv6) mask; NULL when the source IP is loopback/unspecified" }
+    },
+    {
       "name": "hashed_resolver_ip",
       "type": "string",
       "nullable": true,
-      "metadata": { "comment": "Cryptographic peppered SHA-256 pseudonymized DNS resolver identifier (salted SHA-256, not HMAC)" }
+      "metadata": { "comment": "HMAC-SHA256(pepper, resolver_ip); NULL for empty/loopback resolvers" }
     },
     {
       "name": "resolver_asn",
