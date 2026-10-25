@@ -1690,12 +1690,24 @@ if __name__ == "__main__":
     except Exception as ref_err:
         print(f"  * Reference Fetch (Spark-dependent): {ref_err}")
 
-    # Ensure __file__ is defined (not available in Databricks notebook context)
-    if "__file__" not in dir():
-        __file__ = "/Workspace/Users/l232556@lhr.nu.edu.pk/Project-Panopticon/notebooks/01_bronze_ingestion"
+    # Dynamic __file__ resolution for Databricks notebook context (never hardcode user workspace)
+    if "__file__" not in globals() and "__file__" not in locals():
+        _cwd = os.getcwd()
+        if os.path.exists(os.path.join(_cwd, "01_bronze_ingestion.py")):
+            __file__ = os.path.join(_cwd, "01_bronze_ingestion.py")
+        elif os.path.exists(os.path.join(_cwd, "notebooks", "01_bronze_ingestion.py")):
+            __file__ = os.path.join(_cwd, "notebooks", "01_bronze_ingestion.py")
+        else:
+            __file__ = os.path.abspath("notebooks/01_bronze_ingestion.py")
 
-    # Ensure the UC volume exists before raw landing staging
-    spark.sql("CREATE VOLUME IF NOT EXISTS workspace.default.panopticon")
+    # Ensure UC volume exists only if running in a Serverless/UC environment with active Spark
+    if HAS_PYSPARK:
+        try:
+            _spark_inst = resolve_spark_session()
+            if _spark_inst and (os.environ.get("IS_SERVERLESS", "FALSE").upper() == "TRUE" or os.path.exists("/Volumes")):
+                _spark_inst.sql("CREATE VOLUME IF NOT EXISTS workspace.default.panopticon")
+        except Exception:
+            pass  # Ignored on Databricks Community Edition (uses DBFS) and offline runs
 
     print("\n[Step 1 Verification B] Testing Raw Landing Staging...")
     staged_dir = fetch_raw_ooni_telemetry(
