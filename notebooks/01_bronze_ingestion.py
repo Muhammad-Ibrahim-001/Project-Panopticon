@@ -486,9 +486,16 @@ def execute_storage_and_catalog_reset(spark_inst: Optional[SparkSession] = None)
     print("\n✅ Storage & catalog reset complete.\n", flush=True)
 
 
-# Execute reset when run interactively in Databricks with an active SparkSession
-if HAS_PYSPARK and ("spark" in globals() or "spark" in locals()):
-    execute_storage_and_catalog_reset()
+# ==============================================================================
+# [SAFETY GUARD] DESTRUCTIVE RESET IS INACTIVE BY DEFAULT
+# To perform a complete clean slate wipe, uncomment the line below and run this
+# cell manually. Kept commented out so "Run All" never deletes existing data.
+# ==============================================================================
+# if HAS_PYSPARK and ("spark" in globals() or "spark" in locals()):
+#     execute_storage_and_catalog_reset()
+
+print("[Reset Safety Notice] Destructive storage reset is disabled by default to protect lakehouse data.")
+print("                      To execute a wipe, uncomment the execution line in this cell and run manually.\n", flush=True)
 
 
 # COMMAND ----------
