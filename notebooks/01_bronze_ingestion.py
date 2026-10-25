@@ -428,6 +428,72 @@ def create_resilient_http_session(
 # COMMAND ----------
 
 # ==============================================================================
+# STORAGE & CATALOG RESET — DESTRUCTIVE: Drops all project tables and purges
+# underlying storage directories. Run ONLY when you intend to wipe all ingested
+# data and start the pipeline from a clean slate.
+# ==============================================================================
+
+def execute_storage_and_catalog_reset(spark_inst: Optional[SparkSession] = None) -> None:
+    """
+    Safely drops project tables and purges underlying storage directories.
+    Aware of both Databricks Community Edition (DBFS) and Serverless (Unity Catalog).
+    """
+    sp = spark_inst or (globals().get("spark") if "spark" in globals() else None)
+    if not sp:
+        return
+
+    try:
+        _current_catalog = sp.catalog.currentCatalog()
+        _current_schema  = sp.catalog.currentDatabase()
+        _table_prefix    = f"{_current_catalog}.{_current_schema}"
+    except Exception:
+        _table_prefix    = "default"
+
+    _tables_to_drop = [
+        "bronze_ooni_raw",
+        "ref_citizenlab_categories",
+        "quarantine_ooni_raw",
+        "pipeline_execution_logs",
+    ]
+
+    print(f"[Reset] Targeting {len(_tables_to_drop)} tables for deletion...", flush=True)
+
+    for _tbl in _tables_to_drop:
+        _fqn = f"{_table_prefix}.{_tbl}"
+        try:
+            print(f"  → DROP TABLE IF EXISTS {_fqn} ...", end=" ", flush=True)
+            sp.sql(f"DROP TABLE IF EXISTS {_fqn}")
+            print("done.", flush=True)
+        except Exception as _e:
+            print(f"SKIPPED: {_e}", flush=True)
+
+    _dbu = _get_dbutils()
+    _dirs_to_purge = []
+    if os.path.exists("/Volumes"):
+        _dirs_to_purge.append("/Volumes/workspace/default/panopticon")
+    _dirs_to_purge.append("/FileStore/tables/panopticon")
+
+    print("\n[Reset] Purging storage directories:", flush=True)
+    if _dbu and hasattr(_dbu, "fs"):
+        for _d in _dirs_to_purge:
+            try:
+                print(f"  → Purging {_d} ...", end=" ", flush=True)
+                _dbu.fs.rm(_d, recurse=True)
+                print("purged.", flush=True)
+            except Exception as _e:
+                print("not found / skipped.", flush=True)
+
+    print("\n✅ Storage & catalog reset complete.\n", flush=True)
+
+
+# Execute reset when run interactively in Databricks with an active SparkSession
+if HAS_PYSPARK and ("spark" in globals() or "spark" in locals()):
+    execute_storage_and_catalog_reset()
+
+
+# COMMAND ----------
+
+# ==============================================================================
 # STEP 1: REFERENCE TAXONOMY & RAW API TELEMETRY INGESTION
 # ==============================================================================
 
