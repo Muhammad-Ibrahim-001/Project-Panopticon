@@ -1,0 +1,1382 @@
+{
+  "datasets": [
+    {
+      "name": "dim_date_time",
+      "displayName": "Date-Time Dimension",
+      "queryLines": [
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/dim_date_time`"
+      ]
+    },
+    {
+      "name": "dim_date",
+      "displayName": "Date Dimension",
+      "queryLines": [
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/dim_date`"
+      ]
+    },
+    {
+      "name": "agg_daily",
+      "displayName": "Daily Censorship Aggregation",
+      "queryLines": [
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/agg_daily_censorship_severity`"
+      ]
+    },
+    {
+      "name": "dim_content",
+      "displayName": "Content Category Dimension",
+      "queryLines": [
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/dim_content_category`"
+      ]
+    },
+    {
+      "name": "fact_anomaly",
+      "displayName": "Network Anomaly Fact",
+      "queryLines": [
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/fact_network_anomaly`"
+      ]
+    },
+    {
+      "name": "dim_isp",
+      "displayName": "ISP-Telecom Dimension",
+      "queryLines": [
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/dim_isp_telecom`"
+      ]
+    },
+    {
+      "name": "pipeline_logs",
+      "displayName": "Pipeline Execution Logs",
+      "queryLines": [
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/logs/pipeline_execution_logs`"
+      ],
+      "columns": [
+        {
+          "displayName": "success_rate_pct",
+          "description": "Percentage of pipeline runs with status 'Success'",
+          "expression": "100.0 * SUM(CASE WHEN `status` = 'Success' THEN 1 ELSE 0 END) / NULLIF(COUNT(`log_id`), 0)"
+        }
+      ]
+    },
+    {
+      "name": "dim_country",
+      "displayName": "Country-Region Dimension",
+      "queryLines": [
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/dim_country_region`"
+      ]
+    },
+    {
+      "name": "agg_hourly",
+      "displayName": "Hourly Censorship Aggregation",
+      "queryLines": [
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/agg_hourly_censorship_severity`"
+      ]
+    },
+    {
+      "name": "attack_vectors",
+      "displayName": "Attack Vector Breakdown",
+      "queryLines": [
+        "SELECT\n",
+        "  test_family,\n",
+        "  'DNS_TAMPERING' AS vector_type,\n",
+        "  SUM(dns_tampering_count) AS count\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/agg_daily_censorship_severity`\n",
+        "GROUP BY\n",
+        "  test_family\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  test_family,\n",
+        "  'TCP_RESET' AS vector_type,\n",
+        "  SUM(tcp_reset_count) AS count\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/agg_daily_censorship_severity`\n",
+        "GROUP BY\n",
+        "  test_family\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  test_family,\n",
+        "  'TLS_DROP' AS vector_type,\n",
+        "  SUM(tls_drop_count) AS count\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/agg_daily_censorship_severity`\n",
+        "GROUP BY\n",
+        "  test_family\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  test_family,\n",
+        "  'HTTP_BLOCK' AS vector_type,\n",
+        "  SUM(http_block_count) AS count\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/agg_daily_censorship_severity`\n",
+        "GROUP BY\n",
+        "  test_family\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  test_family,\n",
+        "  'ANOMALY_UNCLASSIFIED' AS vector_type,\n",
+        "  SUM(anomaly_unclassified_count) AS count\n",
+        "FROM\n",
+        "  delta.`/Volumes/workspace/default/panopticon/gold/agg_daily_censorship_severity`\n",
+        "GROUP BY\n",
+        "  test_family"
+      ]
+    }
+  ],
+  "relationshipGraphs": [
+    {
+      "sources": [
+        {
+          "name": "DateTime_Dimension",
+          "datasetName": "dim_date_time"
+        },
+        {
+          "name": "Date_Dimension",
+          "datasetName": "dim_date"
+        },
+        {
+          "name": "Daily_Censorship_Aggregation",
+          "datasetName": "agg_daily"
+        },
+        {
+          "name": "Content_Category_Dimension",
+          "datasetName": "dim_content"
+        },
+        {
+          "name": "Network_Anomaly_Fact",
+          "datasetName": "fact_anomaly"
+        },
+        {
+          "name": "ISPTelecom_Dimension",
+          "datasetName": "dim_isp"
+        },
+        {
+          "name": "Pipeline_Execution_Logs",
+          "datasetName": "pipeline_logs"
+        },
+        {
+          "name": "CountryRegion_Dimension",
+          "datasetName": "dim_country"
+        },
+        {
+          "name": "Hourly_Censorship_Aggregation",
+          "datasetName": "agg_hourly"
+        },
+        {
+          "name": "Attack_Vector_Breakdown",
+          "datasetName": "attack_vectors"
+        }
+      ],
+      "relationships": [
+        {
+          "name": "relationship_0",
+          "from": "DateTime_Dimension",
+          "to": "Network_Anomaly_Fact",
+          "on": "`DateTime_Dimension`.`date_time_key` = `Network_Anomaly_Fact`.`date_time_key`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        },
+        {
+          "name": "relationship_1",
+          "from": "Date_Dimension",
+          "to": "Network_Anomaly_Fact",
+          "on": "`Date_Dimension`.`date_key` = `Network_Anomaly_Fact`.`date_key`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        },
+        {
+          "name": "relationship_2",
+          "from": "CountryRegion_Dimension",
+          "to": "Network_Anomaly_Fact",
+          "on": "`CountryRegion_Dimension`.`country_code` = `Network_Anomaly_Fact`.`country_code`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        },
+        {
+          "name": "relationship_3",
+          "from": "ISPTelecom_Dimension",
+          "to": "Network_Anomaly_Fact",
+          "on": "`ISPTelecom_Dimension`.`asn_id` = `Network_Anomaly_Fact`.`asn_id`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        },
+        {
+          "name": "relationship_4",
+          "from": "Content_Category_Dimension",
+          "to": "Network_Anomaly_Fact",
+          "on": "`Content_Category_Dimension`.`category_code` = `Network_Anomaly_Fact`.`category_code`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        },
+        {
+          "name": "relationship_5",
+          "from": "Date_Dimension",
+          "to": "Daily_Censorship_Aggregation",
+          "on": "`Date_Dimension`.`date_key` = `Daily_Censorship_Aggregation`.`date_key`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        },
+        {
+          "name": "relationship_6",
+          "from": "CountryRegion_Dimension",
+          "to": "Daily_Censorship_Aggregation",
+          "on": "`CountryRegion_Dimension`.`country_code` = `Daily_Censorship_Aggregation`.`country_code`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        },
+        {
+          "name": "relationship_7",
+          "from": "ISPTelecom_Dimension",
+          "to": "Daily_Censorship_Aggregation",
+          "on": "`ISPTelecom_Dimension`.`asn_id` = `Daily_Censorship_Aggregation`.`asn_id`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        },
+        {
+          "name": "relationship_8",
+          "from": "Content_Category_Dimension",
+          "to": "Daily_Censorship_Aggregation",
+          "on": "`Content_Category_Dimension`.`category_code` = `Daily_Censorship_Aggregation`.`category_code`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        },
+        {
+          "name": "relationship_9",
+          "from": "DateTime_Dimension",
+          "to": "Hourly_Censorship_Aggregation",
+          "on": "`DateTime_Dimension`.`date_time_key` = `Hourly_Censorship_Aggregation`.`date_time_key`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        },
+        {
+          "name": "relationship_10",
+          "from": "CountryRegion_Dimension",
+          "to": "Hourly_Censorship_Aggregation",
+          "on": "`CountryRegion_Dimension`.`country_code` = `Hourly_Censorship_Aggregation`.`country_code`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "403886fc",
+      "displayName": "Censorship Command Center",
+      "layout": [
+        {
+          "widget": {
+            "name": "country_filter",
+            "queries": [
+              {
+                "name": "_CountryRegion_Dimension__country_code",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "CountryRegion_Dimension__country_code",
+                      "expression": "`CountryRegion_Dimension`.`country_code`"
+                    },
+                    {
+                      "name": "CountryRegion_Dimension__country_code_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Country Filter"
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "CountryRegion_Dimension__country_code",
+                    "queryName": "_CountryRegion_Dimension__country_code"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "date_filter",
+            "queries": [
+              {
+                "name": "_Date_Dimension__calendar_date",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Date_Dimension__calendar_date",
+                      "expression": "`Date_Dimension`.`calendar_date`"
+                    },
+                    {
+                      "name": "Date_Dimension__calendar_date_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Date Range"
+              },
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "Date_Dimension__calendar_date",
+                    "queryName": "_Date_Dimension__calendar_date"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_total_measurements",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "sum(Daily_Censorship_Aggregation__total_measurements)",
+                      "expression": "SUM(`Daily_Censorship_Aggregation`.`total_measurements`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Total Measurements"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(Daily_Censorship_Aggregation__total_measurements)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_cai",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "avg(Daily_Censorship_Aggregation__cai_pct)",
+                      "expression": "AVG(`Daily_Censorship_Aggregation`.`cai_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Censorship Aggression Index"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(Daily_Censorship_Aggregation__cai_pct)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  },
+                  "formatTemplate": "{{ @formatted }}%"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_interference_rate",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "avg(Daily_Censorship_Aggregation__interference_rate_pct)",
+                      "expression": "AVG(`Daily_Censorship_Aggregation`.`interference_rate_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Interference Rate"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(Daily_Censorship_Aggregation__interference_rate_pct)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  },
+                  "formatTemplate": "{{ @formatted }}%"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_countries",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "countdistinct(Daily_Censorship_Aggregation__country_code)",
+                      "expression": "COUNT(DISTINCT `Daily_Censorship_Aggregation`.`country_code`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Countries Monitored"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "countdistinct(Daily_Censorship_Aggregation__country_code)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "hourly_timeline",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Hourly_Censorship_Aggregation__hour_of_day",
+                      "expression": "`Hourly_Censorship_Aggregation`.`hour_of_day`"
+                    },
+                    {
+                      "name": "sum(Hourly_Censorship_Aggregation__total_measurements)",
+                      "expression": "SUM(`Hourly_Censorship_Aggregation`.`total_measurements`)"
+                    },
+                    {
+                      "name": "avg(Hourly_Censorship_Aggregation__cai_pct)",
+                      "expression": "AVG(`Hourly_Censorship_Aggregation`.`cai_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Hourly Censorship Timeline"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "Hourly_Censorship_Aggregation__hour_of_day",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "primary": {
+                    "fields": [
+                      {
+                        "fieldName": "sum(Hourly_Censorship_Aggregation__total_measurements)"
+                      }
+                    ],
+                    "scale": {
+                      "type": "quantitative"
+                    }
+                  },
+                  "secondary": {
+                    "fields": [
+                      {
+                        "fieldName": "avg(Hourly_Censorship_Aggregation__cai_pct)"
+                      }
+                    ],
+                    "scale": {
+                      "type": "quantitative"
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "attack_vectors",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Attack_Vector_Breakdown__vector_type",
+                      "expression": "`Attack_Vector_Breakdown`.`vector_type`"
+                    },
+                    {
+                      "name": "Attack_Vector_Breakdown__test_family",
+                      "expression": "`Attack_Vector_Breakdown`.`test_family`"
+                    },
+                    {
+                      "name": "sum(Attack_Vector_Breakdown__count)",
+                      "expression": "SUM(`Attack_Vector_Breakdown`.`count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Attack Vector Breakdown"
+              },
+              "version": 3,
+              "mark": {
+                "layout": "stack"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Attack_Vector_Breakdown__test_family",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(Attack_Vector_Breakdown__count)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Attack_Vector_Breakdown__vector_type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 5,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "content_category",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Content_Category_Dimension__human_rights_risk_tier",
+                      "expression": "`Content_Category_Dimension`.`human_rights_risk_tier`"
+                    },
+                    {
+                      "name": "sum(Daily_Censorship_Aggregation__total_measurements)",
+                      "expression": "SUM(`Daily_Censorship_Aggregation`.`total_measurements`)"
+                    },
+                    {
+                      "name": "Content_Category_Dimension__category_name",
+                      "expression": "`Content_Category_Dimension`.`category_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Content Category Vulnerability"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(Daily_Censorship_Aggregation__total_measurements)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "Content_Category_Dimension__category_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "color": {
+                  "fieldName": "Content_Category_Dimension__human_rights_risk_tier",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "isp_telecom",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "ISPTelecom_Dimension__provider_name",
+                      "expression": "`ISPTelecom_Dimension`.`provider_name`"
+                    },
+                    {
+                      "name": "sum(Daily_Censorship_Aggregation__total_measurements)",
+                      "expression": "SUM(`Daily_Censorship_Aggregation`.`total_measurements`)"
+                    },
+                    {
+                      "name": "avg(Daily_Censorship_Aggregation__cai_pct)",
+                      "expression": "AVG(`Daily_Censorship_Aggregation`.`cai_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "ISP/Telecom Censorship Analysis"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "ISPTelecom_Dimension__provider_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fields": [
+                    {
+                      "fieldName": "sum(Daily_Censorship_Aggregation__total_measurements)"
+                    },
+                    {
+                      "fieldName": "avg(Daily_Censorship_Aggregation__cai_pct)"
+                    }
+                  ],
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 11,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "country_summary",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "CountryRegion_Dimension__country_name",
+                      "expression": "`CountryRegion_Dimension`.`country_name`"
+                    },
+                    {
+                      "name": "sum(Daily_Censorship_Aggregation__total_measurements)",
+                      "expression": "SUM(`Daily_Censorship_Aggregation`.`total_measurements`)"
+                    },
+                    {
+                      "name": "avg(Daily_Censorship_Aggregation__cai_pct)",
+                      "expression": "AVG(`Daily_Censorship_Aggregation`.`cai_pct`)"
+                    },
+                    {
+                      "name": "avg(Daily_Censorship_Aggregation__interference_rate_pct)",
+                      "expression": "AVG(`Daily_Censorship_Aggregation`.`interference_rate_pct`)"
+                    },
+                    {
+                      "name": "avg(Daily_Censorship_Aggregation__confirmed_rate_pct)",
+                      "expression": "AVG(`Daily_Censorship_Aggregation`.`confirmed_rate_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Country-level Censorship Summary"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "CountryRegion_Dimension__country_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fields": [
+                    {
+                      "fieldName": "sum(Daily_Censorship_Aggregation__total_measurements)"
+                    },
+                    {
+                      "fieldName": "avg(Daily_Censorship_Aggregation__cai_pct)"
+                    },
+                    {
+                      "fieldName": "avg(Daily_Censorship_Aggregation__interference_rate_pct)"
+                    },
+                    {
+                      "fieldName": "avg(Daily_Censorship_Aggregation__confirmed_rate_pct)"
+                    }
+                  ],
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 12,
+            "height": 5
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "pipeline_ops",
+      "displayName": "Pipeline Operations & Audit",
+      "layout": [
+        {
+          "widget": {
+            "name": "kpi_total_runs",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "count(Pipeline_Execution_Logs__log_id)",
+                      "expression": "COUNT(`Pipeline_Execution_Logs`.`log_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Total Pipeline Runs"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(Pipeline_Execution_Logs__log_id)",
+                  "format": {
+                    "abbreviation": "none",
+                    "type": "number-plain"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_success_rate",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "measure(Pipeline_Execution_Logs__success_rate_pct)",
+                      "expression": "MEASURE(`Pipeline_Execution_Logs`.`success_rate_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Pipeline Success Rate"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Pipeline_Execution_Logs__success_rate_pct)",
+                  "format": {
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "places": 1,
+                      "type": "max"
+                    },
+                    "type": "number-plain"
+                  },
+                  "formatTemplate": "{{ @formatted }}%"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_total_rows",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "sum(Pipeline_Execution_Logs__rows_read)",
+                      "expression": "SUM(`Pipeline_Execution_Logs`.`rows_read`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Total Rows Processed"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(Pipeline_Execution_Logs__rows_read)",
+                  "format": {
+                    "abbreviation": "compact",
+                    "type": "number-plain"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "execution_timeline",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Pipeline_Execution_Logs__status",
+                      "expression": "`Pipeline_Execution_Logs`.`status`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__start_time",
+                      "expression": "`Pipeline_Execution_Logs`.`start_time`"
+                    },
+                    {
+                      "name": "sum(Pipeline_Execution_Logs__duration_seconds)",
+                      "expression": "SUM(`Pipeline_Execution_Logs`.`duration_seconds`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Pipeline Execution Timeline"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Pipeline_Execution_Logs__start_time",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(Pipeline_Execution_Logs__duration_seconds)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Pipeline_Execution_Logs__status",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "rows_by_layer",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Pipeline_Execution_Logs__pipeline_layer",
+                      "expression": "`Pipeline_Execution_Logs`.`pipeline_layer`"
+                    },
+                    {
+                      "name": "sum(Pipeline_Execution_Logs__rows_read)",
+                      "expression": "SUM(`Pipeline_Execution_Logs`.`rows_read`)"
+                    },
+                    {
+                      "name": "sum(Pipeline_Execution_Logs__rows_inserted)",
+                      "expression": "SUM(`Pipeline_Execution_Logs`.`rows_inserted`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Rows Processed by Layer"
+              },
+              "version": 3,
+              "mark": {
+                "layout": "stack"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Pipeline_Execution_Logs__pipeline_layer",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fields": [
+                    {
+                      "fieldName": "sum(Pipeline_Execution_Logs__rows_read)"
+                    },
+                    {
+                      "fieldName": "sum(Pipeline_Execution_Logs__rows_inserted)"
+                    }
+                  ],
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "audit_log_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Pipeline_Execution_Logs__log_id",
+                      "expression": "`Pipeline_Execution_Logs`.`log_id`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__pipeline_layer",
+                      "expression": "`Pipeline_Execution_Logs`.`pipeline_layer`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__batch_parameter",
+                      "expression": "`Pipeline_Execution_Logs`.`batch_parameter`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__load_type",
+                      "expression": "`Pipeline_Execution_Logs`.`load_type`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__start_time",
+                      "expression": "`Pipeline_Execution_Logs`.`start_time`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__end_time",
+                      "expression": "`Pipeline_Execution_Logs`.`end_time`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__duration_seconds",
+                      "expression": "`Pipeline_Execution_Logs`.`duration_seconds`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__status",
+                      "expression": "`Pipeline_Execution_Logs`.`status`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__rows_read",
+                      "expression": "`Pipeline_Execution_Logs`.`rows_read`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__rows_inserted",
+                      "expression": "`Pipeline_Execution_Logs`.`rows_inserted`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__rows_updated",
+                      "expression": "`Pipeline_Execution_Logs`.`rows_updated`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__rows_quarantined",
+                      "expression": "`Pipeline_Execution_Logs`.`rows_quarantined`"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__error_message",
+                      "expression": "`Pipeline_Execution_Logs`.`error_message`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Pipeline Execution Log"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__log_id"
+                  },
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__pipeline_layer"
+                  },
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__batch_parameter"
+                  },
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__load_type"
+                  },
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__start_time"
+                  },
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__end_time"
+                  },
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__duration_seconds"
+                  },
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__status"
+                  },
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__rows_read"
+                  },
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__rows_inserted"
+                  },
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__rows_updated"
+                  },
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__rows_quarantined"
+                  },
+                  {
+                    "fieldName": "Pipeline_Execution_Logs__error_message"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 8,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "status_pie",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "count(Pipeline_Execution_Logs__log_id)",
+                      "expression": "COUNT(`Pipeline_Execution_Logs`.`log_id`)"
+                    },
+                    {
+                      "name": "Pipeline_Execution_Logs__status",
+                      "expression": "`Pipeline_Execution_Logs`.`status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Pipeline Status Distribution"
+              },
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "count(Pipeline_Execution_Logs__log_id)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Pipeline_Execution_Logs__status",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 9,
+            "width": 4,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
