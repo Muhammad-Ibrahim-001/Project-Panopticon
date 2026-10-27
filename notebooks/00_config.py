@@ -26,6 +26,7 @@ Spark performance profiles, and runtime parameter resolvers.
 import os
 from typing import Dict, Any, List
 
+
 # ------------------------------------------------------------------------------
 # 1. Environment Detection & Storage Architecture
 # ------------------------------------------------------------------------------
@@ -46,7 +47,7 @@ if is_databricks_environment() and (
     STORAGE_ROOT = "/Volumes/workspace/default/panopticon"
 elif is_databricks_environment():
     # Databricks Community Edition DBFS storage prefix
-    STORAGE_ROOT = "/FileStore/tables/panopticon"
+    STORAGE_ROOT = "/Volumes/workspace/default/panopticon"
 else:
     # Local project repository root fallback
     STORAGE_ROOT = os.path.abspath(
