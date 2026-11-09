@@ -7,6 +7,8 @@
 #   - [Affects]: notebooks/00_audit_logger.py
 #   - [Affects]: notebooks/01_bronze_ingestion.py
 #   - [Affects]: notebooks/02_silver_transformation.py
+#   - [Affects]: notebooks/03_gold_dimensional_modeling.ipynb
+#   - [Affects]: notebooks/04_master_pipeline.ipynb
 #   - [Affects]: notebooks/run_pipeline.py
 #   - [Schema/State Changes]:
 #       * Centralizes DBFS and local storage paths (Raw Landing, Bronze, Silver & child tables, Gold fact, Quarantine, Logs)
