@@ -141,11 +141,12 @@ Under course guidelines, manual data uploads via the Databricks UI or local uplo
 2. Set **Load Type**: `incremental`
 3. Set **Country Code**: `PK` (or `IR`)
 4. Set **Lookback Days**: `3`
-5. Click **Run All** in Databricks.
-6. The runner invokes:
+5. Open `notebooks/04_master_pipeline.ipynb` and click **Run All** in Databricks.
+6. The master orchestrator sequentially invokes:
    - `00_audit_logger`: Creates execution run entry (`status = 'Running'`).
    - `01_bronze_ingestion`: Ingests sliding window `[2026-09-25, 2026-09-28]`, validates schema, diverts corrupted records to `quarantine_ooni_raw`, and writes valid data to `bronze_ooni_raw`.
    - `02_silver_transformation`: Hashes PII, explodes protocol arrays, categorizes tampering vectors, joins Citizen Lab categories, and performs Delta `MERGE INTO`.
+   - `03_gold_dimensional_modeling`: Populates Star Schema facts (`fact_network_measurement`, `fact_network_anomaly`), dimensions, and pre-aggregated CAI severity marts (`agg_daily_censorship_severity`, `agg_hourly_censorship_severity`) with Z-ORDER co-location.
    - `00_audit_logger`: Finalizes entry with `rows_read`, `rows_inserted` (new & late arrivals), `rows_updated` (enrichment changes), and `status = 'Success'`.
 
 ### 3.4 Running an On-Demand Historical Backfill
