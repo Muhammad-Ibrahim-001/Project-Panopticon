@@ -326,9 +326,25 @@ The Gold layer provides high-performance, analytics-ready tables modeled in a **
 3. **"Which telecommunication providers act as aggressive state censors vs. neutral carriers?"**
    * Identifies compliance divergence across competing commercial ISPs within the same jurisdiction.
 
-### 5.2 Dashboard Specifications (Power BI / Tableau)
+### 5.2 Production Watchtower Dashboard Suite (Power BI)
 
-![Panopticon Executive Dashboard Mockup](../assets/dashboard_mockup.png)
+The finalized lakehouse serves a production-ready, four-page Power BI dashboard suite (`dashboards/Panopticon_Dashboard.pbip`):
+
+#### Page 1: Sovereign Executive Watchtower
+![Panopticon Executive Watchtower](../assets/powerbi_page1_executive_watchtower.png)
+*Figure 3a. Sovereign Executive Watchtower: Live Censorship Aggression Index (CAI Defcon Meter: 9.90%), Carrier Strategic Intentionality Scatter Matrix (Surgical vs. Collateral Disruption), Societal Vulnerability Treemap, and Telecom Aggression Ranking.*
+
+#### Page 2: Protocol Interdiction & DPI Forensics
+![Protocol Interdiction & DPI Forensics](../assets/powerbi_page2_protocol_forensics.png)
+*Figure 3b. Protocol Forensics: 100% Stacked DPI Fingerprint across Autonomous Systems, Censorship Concentration by Human Rights Risk Tier (Funnel), Category Attack Matrix, and High-Confidence Forensic Stream (Atomic Fact Grain).*
+
+#### Page 3: Circadian Temporal Anomaly & Curfew Waveform
+![Circadian Temporal Anomaly & Curfew Waveform](../assets/powerbi_page3_circadian_curfew.png)
+*Figure 3c. Temporal Forensics: Dual-axis Diurnal Waveform (Monitored Probes vs. Tampered Interdictions) and Nocturnal Anomaly Curve exposing state-enforced digital curfews.*
+
+#### Page 4: Delta Lakehouse Architecture & FinOps Audit
+![Delta Lakehouse Architecture & FinOps Audit](../assets/powerbi_page4_lakehouse_finops.png)
+*Figure 3d. Lakehouse Observability & FinOps: Pipeline Latency Waterfall (Bronze → Silver → Gold), Medallion Ingestion Throughput (Rows Inserted), ACID Commit Verification (82.5%), and $0.00 Free-Tier Serverless Cost Governance.*
 
 <details>
 <summary>🔍 Click to inspect ASCII Wireframe Layout</summary>

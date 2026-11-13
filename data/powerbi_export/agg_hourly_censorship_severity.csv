@@ -1,0 +1,5 @@
+date_time_key,calendar_date,hour_of_day,country_code,test_family,total_measurements,ooni_attested_tampered,confirmed_blocked_count,interference_signal_count,heuristic_only_count,dns_tampering_count,tcp_reset_count,tls_drop_count,http_block_count,anomaly_unclassified_count,dns_flag_count,tcp_flag_count,tls_flag_count,http_flag_count,avg_test_runtime_seconds,cai_pct,confirmed_rate_pct,interference_rate_pct,load_timestamp,_batch_id
+2026102421,2026-10-24,21,PK,WEB,34,3,0,14,11,2,6,1,5,0,2,6,1,7,26.34166665438234,8.8235,0.0,41.1765,2026-11-09T16:32:36.341Z,GOLD_20261024_20261024_ALL_INCREMENTAL
+2026102422,2026-10-24,22,PK,WEB,200,33,0,143,110,16,108,10,9,0,16,108,11,40,3.4904543882749994,16.5,0.0,71.5,2026-11-09T16:32:36.341Z,GOLD_20261024_20261024_ALL_INCREMENTAL
+2026102423,2026-10-24,23,PK,WEB,552,45,0,321,276,38,241,4,38,0,38,241,10,103,3.8852773632300677,8.1522,0.0,58.1522,2026-11-09T16:32:36.341Z,GOLD_20261024_20261024_ALL_INCREMENTAL
+2026102420,2026-10-24,20,PK,WEB,214,18,0,51,33,17,14,4,16,0,17,14,4,23,5.129962290799067,8.4112,0.0,23.8318,2026-11-09T16:32:36.341Z,GOLD_20261024_20261024_ALL_INCREMENTAL
