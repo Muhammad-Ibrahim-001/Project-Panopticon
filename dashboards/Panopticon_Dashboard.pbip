@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "artifacts": [
+    {
+      "report": {
+        "path": "Panopticon_Dashboard.Report"
+      }
+    }
+  ],
+  "settings": {}
+}
+

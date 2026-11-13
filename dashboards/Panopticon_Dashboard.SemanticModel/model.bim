@@ -1,0 +1,1203 @@
+{
+  "compatibilityLevel": 1550,
+  "model": {
+    "culture": "en-US",
+    "dataAccessOptions": {
+      "legacyRedirects": true,
+      "returnErrorValuesAsNull": true
+    },
+    "defaultPowerBIDataSourceVersion": "powerBI_V3",
+    "sourceQueryCulture": "en-US",
+    "tables": [
+      {
+        "name": "agg_daily_censorship_severity",
+        "columns": [
+          {
+            "name": "date_key",
+            "dataType": "int64",
+            "sourceColumn": "date_key",
+            "formatString": "#,0"
+          },
+          {
+            "name": "calendar_date",
+            "dataType": "dateTime",
+            "sourceColumn": "calendar_date"
+          },
+          {
+            "name": "country_code",
+            "dataType": "string",
+            "sourceColumn": "country_code"
+          },
+          {
+            "name": "asn_id",
+            "dataType": "string",
+            "sourceColumn": "asn_id"
+          },
+          {
+            "name": "category_code",
+            "dataType": "string",
+            "sourceColumn": "category_code"
+          },
+          {
+            "name": "test_family",
+            "dataType": "string",
+            "sourceColumn": "test_family"
+          },
+          {
+            "name": "total_measurements",
+            "dataType": "int64",
+            "sourceColumn": "total_measurements",
+            "formatString": "#,0"
+          },
+          {
+            "name": "ooni_attested_tampered",
+            "dataType": "int64",
+            "sourceColumn": "ooni_attested_tampered",
+            "formatString": "#,0"
+          },
+          {
+            "name": "confirmed_blocked_count",
+            "dataType": "int64",
+            "sourceColumn": "confirmed_blocked_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "interference_signal_count",
+            "dataType": "int64",
+            "sourceColumn": "interference_signal_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "heuristic_only_count",
+            "dataType": "int64",
+            "sourceColumn": "heuristic_only_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "dns_tampering_count",
+            "dataType": "int64",
+            "sourceColumn": "dns_tampering_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "tcp_reset_count",
+            "dataType": "int64",
+            "sourceColumn": "tcp_reset_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "tls_drop_count",
+            "dataType": "int64",
+            "sourceColumn": "tls_drop_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "http_block_count",
+            "dataType": "int64",
+            "sourceColumn": "http_block_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "anomaly_unclassified_count",
+            "dataType": "int64",
+            "sourceColumn": "anomaly_unclassified_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "dns_flag_count",
+            "dataType": "int64",
+            "sourceColumn": "dns_flag_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "tcp_flag_count",
+            "dataType": "int64",
+            "sourceColumn": "tcp_flag_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "tls_flag_count",
+            "dataType": "int64",
+            "sourceColumn": "tls_flag_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "http_flag_count",
+            "dataType": "int64",
+            "sourceColumn": "http_flag_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "avg_test_runtime_seconds",
+            "dataType": "double",
+            "sourceColumn": "avg_test_runtime_seconds",
+            "formatString": "0.00"
+          },
+          {
+            "name": "cai_pct",
+            "dataType": "double",
+            "sourceColumn": "cai_pct",
+            "formatString": "0.00"
+          },
+          {
+            "name": "confirmed_rate_pct",
+            "dataType": "double",
+            "sourceColumn": "confirmed_rate_pct",
+            "formatString": "0.00"
+          },
+          {
+            "name": "interference_rate_pct",
+            "dataType": "double",
+            "sourceColumn": "interference_rate_pct",
+            "formatString": "0.00"
+          },
+          {
+            "name": "load_timestamp",
+            "dataType": "dateTime",
+            "sourceColumn": "load_timestamp"
+          },
+          {
+            "name": "_batch_id",
+            "dataType": "string",
+            "sourceColumn": "_batch_id"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "agg_daily_censorship_severity",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Csv.Document(File.Contents(\"D:\\\\Semester Projects\\\\Panopticon\\\\data\\\\powerbi_export\\\\agg_daily_censorship_severity.csv\"), [Delimiter=\",\", Columns=26, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),",
+                "    #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),",
+                "    #\"Changed Type\" = Table.TransformColumnTypes(#\"Promoted Headers\", {{\"date_key\", Int64.Type}, {\"calendar_date\", type date}, {\"country_code\", type text}, {\"asn_id\", type text}, {\"category_code\", type text}, {\"test_family\", type text}, {\"total_measurements\", Int64.Type}, {\"ooni_attested_tampered\", Int64.Type}, {\"confirmed_blocked_count\", Int64.Type}, {\"interference_signal_count\", Int64.Type}, {\"heuristic_only_count\", Int64.Type}, {\"dns_tampering_count\", Int64.Type}, {\"tcp_reset_count\", Int64.Type}, {\"tls_drop_count\", Int64.Type}, {\"http_block_count\", Int64.Type}, {\"anomaly_unclassified_count\", Int64.Type}, {\"dns_flag_count\", Int64.Type}, {\"tcp_flag_count\", Int64.Type}, {\"tls_flag_count\", Int64.Type}, {\"http_flag_count\", Int64.Type}, {\"avg_test_runtime_seconds\", type number}, {\"cai_pct\", type number}, {\"confirmed_rate_pct\", type number}, {\"interference_rate_pct\", type number}, {\"load_timestamp\", type datetime}, {\"_batch_id\", type text}})",
+                "in",
+                "    #\"Changed Type\""
+              ]
+            }
+          }
+        ],
+        "measures": [
+          {
+            "name": "Total Measurements",
+            "expression": "SUMX(agg_daily_censorship_severity, VALUE(agg_daily_censorship_severity[total_measurements]))",
+            "formatString": "#,0"
+          },
+          {
+            "name": "Tampered Probes",
+            "expression": "SUMX(agg_daily_censorship_severity, VALUE(agg_daily_censorship_severity[ooni_attested_tampered]))",
+            "formatString": "#,0"
+          },
+          {
+            "name": "Censorship Aggression Index %",
+            "expression": "DIVIDE([Tampered Probes], [Total Measurements], 0)",
+            "formatString": "0.00%"
+          },
+          {
+            "name": "Confirmed Blocked Count",
+            "expression": "SUMX(agg_daily_censorship_severity, VALUE(agg_daily_censorship_severity[confirmed_blocked_count]))",
+            "formatString": "#,0"
+          },
+          {
+            "name": "DNS Tampering %",
+            "expression": "DIVIDE(SUMX(agg_daily_censorship_severity, VALUE(agg_daily_censorship_severity[dns_tampering_count])), [Total Measurements], 0) * 100",
+            "formatString": "0.00%"
+          },
+          {
+            "name": "TCP Reset DPI %",
+            "expression": "DIVIDE(SUMX(agg_daily_censorship_severity, VALUE(agg_daily_censorship_severity[tcp_reset_count])), [Total Measurements], 0) * 100",
+            "formatString": "0.00%"
+          },
+          {
+            "name": "TLS Drop %",
+            "expression": "DIVIDE(SUMX(agg_daily_censorship_severity, VALUE(agg_daily_censorship_severity[tls_drop_count])), [Total Measurements], 0) * 100",
+            "formatString": "0.00%"
+          },
+          {
+            "name": "Targeted Censorship Count",
+            "expression": "SUMX(agg_daily_censorship_severity, VALUE(agg_daily_censorship_severity[ooni_attested_tampered]))",
+            "formatString": "#,0"
+          },
+          {
+            "name": "Collateral Disruption Count",
+            "expression": "SUMX(agg_daily_censorship_severity, VALUE(agg_daily_censorship_severity[interference_signal_count]))",
+            "formatString": "#,0"
+          },
+          {
+            "name": "Surgical Precision Index",
+            "expression": "DIVIDE([Targeted Censorship Count], [Collateral Disruption Count], 0) * 100",
+            "formatString": "0.00"
+          }
+        ]
+      },
+      {
+        "name": "agg_hourly_censorship_severity",
+        "columns": [
+          {
+            "name": "date_time_key",
+            "dataType": "int64",
+            "sourceColumn": "date_time_key",
+            "formatString": "#,0"
+          },
+          {
+            "name": "calendar_date",
+            "dataType": "dateTime",
+            "sourceColumn": "calendar_date"
+          },
+          {
+            "name": "hour_of_day",
+            "dataType": "int64",
+            "sourceColumn": "hour_of_day",
+            "formatString": "#,0"
+          },
+          {
+            "name": "country_code",
+            "dataType": "string",
+            "sourceColumn": "country_code"
+          },
+          {
+            "name": "test_family",
+            "dataType": "string",
+            "sourceColumn": "test_family"
+          },
+          {
+            "name": "total_measurements",
+            "dataType": "int64",
+            "sourceColumn": "total_measurements",
+            "formatString": "#,0"
+          },
+          {
+            "name": "ooni_attested_tampered",
+            "dataType": "int64",
+            "sourceColumn": "ooni_attested_tampered",
+            "formatString": "#,0"
+          },
+          {
+            "name": "confirmed_blocked_count",
+            "dataType": "int64",
+            "sourceColumn": "confirmed_blocked_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "interference_signal_count",
+            "dataType": "int64",
+            "sourceColumn": "interference_signal_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "heuristic_only_count",
+            "dataType": "int64",
+            "sourceColumn": "heuristic_only_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "dns_tampering_count",
+            "dataType": "int64",
+            "sourceColumn": "dns_tampering_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "tcp_reset_count",
+            "dataType": "int64",
+            "sourceColumn": "tcp_reset_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "tls_drop_count",
+            "dataType": "int64",
+            "sourceColumn": "tls_drop_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "http_block_count",
+            "dataType": "int64",
+            "sourceColumn": "http_block_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "anomaly_unclassified_count",
+            "dataType": "int64",
+            "sourceColumn": "anomaly_unclassified_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "dns_flag_count",
+            "dataType": "int64",
+            "sourceColumn": "dns_flag_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "tcp_flag_count",
+            "dataType": "int64",
+            "sourceColumn": "tcp_flag_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "tls_flag_count",
+            "dataType": "int64",
+            "sourceColumn": "tls_flag_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "http_flag_count",
+            "dataType": "int64",
+            "sourceColumn": "http_flag_count",
+            "formatString": "#,0"
+          },
+          {
+            "name": "avg_test_runtime_seconds",
+            "dataType": "double",
+            "sourceColumn": "avg_test_runtime_seconds",
+            "formatString": "0.00"
+          },
+          {
+            "name": "cai_pct",
+            "dataType": "double",
+            "sourceColumn": "cai_pct",
+            "formatString": "0.00"
+          },
+          {
+            "name": "confirmed_rate_pct",
+            "dataType": "double",
+            "sourceColumn": "confirmed_rate_pct",
+            "formatString": "0.00"
+          },
+          {
+            "name": "interference_rate_pct",
+            "dataType": "double",
+            "sourceColumn": "interference_rate_pct",
+            "formatString": "0.00"
+          },
+          {
+            "name": "load_timestamp",
+            "dataType": "dateTime",
+            "sourceColumn": "load_timestamp"
+          },
+          {
+            "name": "_batch_id",
+            "dataType": "string",
+            "sourceColumn": "_batch_id"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "agg_hourly_censorship_severity",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Csv.Document(File.Contents(\"D:\\\\Semester Projects\\\\Panopticon\\\\data\\\\powerbi_export\\\\agg_hourly_censorship_severity.csv\"), [Delimiter=\",\", Columns=25, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),",
+                "    #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),",
+                "    #\"Changed Type\" = Table.TransformColumnTypes(#\"Promoted Headers\", {{\"date_time_key\", Int64.Type}, {\"calendar_date\", type date}, {\"hour_of_day\", Int64.Type}, {\"country_code\", type text}, {\"test_family\", type text}, {\"total_measurements\", Int64.Type}, {\"ooni_attested_tampered\", Int64.Type}, {\"confirmed_blocked_count\", Int64.Type}, {\"interference_signal_count\", Int64.Type}, {\"heuristic_only_count\", Int64.Type}, {\"dns_tampering_count\", Int64.Type}, {\"tcp_reset_count\", Int64.Type}, {\"tls_drop_count\", Int64.Type}, {\"http_block_count\", Int64.Type}, {\"anomaly_unclassified_count\", Int64.Type}, {\"dns_flag_count\", Int64.Type}, {\"tcp_flag_count\", Int64.Type}, {\"tls_flag_count\", Int64.Type}, {\"http_flag_count\", Int64.Type}, {\"avg_test_runtime_seconds\", type number}, {\"cai_pct\", type number}, {\"confirmed_rate_pct\", type number}, {\"interference_rate_pct\", type number}, {\"load_timestamp\", type datetime}, {\"_batch_id\", type text}})",
+                "in",
+                "    #\"Changed Type\""
+              ]
+            }
+          }
+        ],
+        "measures": [
+          {
+            "name": "Hourly Measurements",
+            "expression": "SUMX(agg_hourly_censorship_severity, VALUE(agg_hourly_censorship_severity[total_measurements]))",
+            "formatString": "#,0"
+          },
+          {
+            "name": "Hourly Tampered",
+            "expression": "SUMX(agg_hourly_censorship_severity, VALUE(agg_hourly_censorship_severity[ooni_attested_tampered]))",
+            "formatString": "#,0"
+          },
+          {
+            "name": "Hourly Total",
+            "expression": "SUMX(agg_hourly_censorship_severity, VALUE(agg_hourly_censorship_severity[total_measurements]))",
+            "formatString": "#,0"
+          },
+          {
+            "name": "Hourly CAI %",
+            "expression": "DIVIDE([Hourly Tampered], [Hourly Total], 0)",
+            "formatString": "0.0%"
+          },
+          {
+            "name": "Hourly Confirmed Blocked",
+            "expression": "SUMX(agg_hourly_censorship_severity, VALUE(agg_hourly_censorship_severity[confirmed_blocked_count]))",
+            "formatString": "#,0"
+          }
+        ]
+      },
+      {
+        "name": "dim_content_category",
+        "columns": [
+          {
+            "name": "category_code",
+            "dataType": "string",
+            "sourceColumn": "category_code"
+          },
+          {
+            "name": "category_name",
+            "dataType": "string",
+            "sourceColumn": "category_name"
+          },
+          {
+            "name": "category_group",
+            "dataType": "string",
+            "sourceColumn": "category_group"
+          },
+          {
+            "name": "human_rights_risk_tier",
+            "dataType": "string",
+            "sourceColumn": "human_rights_risk_tier"
+          },
+          {
+            "name": "load_timestamp",
+            "dataType": "dateTime",
+            "sourceColumn": "load_timestamp"
+          },
+          {
+            "name": "_batch_id",
+            "dataType": "string",
+            "sourceColumn": "_batch_id"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "dim_content_category",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Csv.Document(File.Contents(\"D:\\\\Semester Projects\\\\Panopticon\\\\data\\\\powerbi_export\\\\dim_content_category.csv\"), [Delimiter=\",\", Columns=6, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),",
+                "    #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),",
+                "    #\"Changed Type\" = Table.TransformColumnTypes(#\"Promoted Headers\", {{\"category_code\", type text}, {\"category_name\", type text}, {\"category_group\", type text}, {\"human_rights_risk_tier\", type text}, {\"load_timestamp\", type datetime}, {\"_batch_id\", type text}})",
+                "in",
+                "    #\"Changed Type\""
+              ]
+            }
+          }
+        ],
+        "measures": []
+      },
+      {
+        "name": "dim_country_region",
+        "columns": [
+          {
+            "name": "country_code",
+            "dataType": "string",
+            "sourceColumn": "country_code"
+          },
+          {
+            "name": "country_name",
+            "dataType": "string",
+            "sourceColumn": "country_name"
+          },
+          {
+            "name": "un_region",
+            "dataType": "string",
+            "sourceColumn": "un_region"
+          },
+          {
+            "name": "press_freedom_index_tier",
+            "dataType": "string",
+            "sourceColumn": "press_freedom_index_tier"
+          },
+          {
+            "name": "is_focus_country",
+            "dataType": "boolean",
+            "sourceColumn": "is_focus_country"
+          },
+          {
+            "name": "load_timestamp",
+            "dataType": "dateTime",
+            "sourceColumn": "load_timestamp"
+          },
+          {
+            "name": "_batch_id",
+            "dataType": "string",
+            "sourceColumn": "_batch_id"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "dim_country_region",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Csv.Document(File.Contents(\"D:\\\\Semester Projects\\\\Panopticon\\\\data\\\\powerbi_export\\\\dim_country_region.csv\"), [Delimiter=\",\", Columns=7, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),",
+                "    #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),",
+                "    #\"Changed Type\" = Table.TransformColumnTypes(#\"Promoted Headers\", {{\"country_code\", type text}, {\"country_name\", type text}, {\"un_region\", type text}, {\"press_freedom_index_tier\", type text}, {\"is_focus_country\", type logical}, {\"load_timestamp\", type datetime}, {\"_batch_id\", type text}})",
+                "in",
+                "    #\"Changed Type\""
+              ]
+            }
+          }
+        ],
+        "measures": []
+      },
+      {
+        "name": "dim_date",
+        "columns": [
+          {
+            "name": "date_key",
+            "dataType": "int64",
+            "sourceColumn": "date_key",
+            "formatString": "#,0"
+          },
+          {
+            "name": "calendar_date",
+            "dataType": "dateTime",
+            "sourceColumn": "calendar_date"
+          },
+          {
+            "name": "day_of_week",
+            "dataType": "int64",
+            "sourceColumn": "day_of_week",
+            "formatString": "#,0"
+          },
+          {
+            "name": "day_name",
+            "dataType": "string",
+            "sourceColumn": "day_name"
+          },
+          {
+            "name": "week_of_year",
+            "dataType": "int64",
+            "sourceColumn": "week_of_year",
+            "formatString": "#,0"
+          },
+          {
+            "name": "month",
+            "dataType": "int64",
+            "sourceColumn": "month",
+            "formatString": "#,0"
+          },
+          {
+            "name": "month_name",
+            "dataType": "string",
+            "sourceColumn": "month_name"
+          },
+          {
+            "name": "quarter",
+            "dataType": "int64",
+            "sourceColumn": "quarter",
+            "formatString": "#,0"
+          },
+          {
+            "name": "year",
+            "dataType": "int64",
+            "sourceColumn": "year",
+            "formatString": "#,0"
+          },
+          {
+            "name": "is_weekend",
+            "dataType": "boolean",
+            "sourceColumn": "is_weekend"
+          },
+          {
+            "name": "is_crisis_period",
+            "dataType": "boolean",
+            "sourceColumn": "is_crisis_period"
+          },
+          {
+            "name": "crisis_label",
+            "dataType": "string",
+            "sourceColumn": "crisis_label"
+          },
+          {
+            "name": "load_timestamp",
+            "dataType": "dateTime",
+            "sourceColumn": "load_timestamp"
+          },
+          {
+            "name": "_batch_id",
+            "dataType": "string",
+            "sourceColumn": "_batch_id"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "dim_date",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Csv.Document(File.Contents(\"D:\\\\Semester Projects\\\\Panopticon\\\\data\\\\powerbi_export\\\\dim_date.csv\"), [Delimiter=\",\", Columns=14, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),",
+                "    #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),",
+                "    #\"Changed Type\" = Table.TransformColumnTypes(#\"Promoted Headers\", {{\"date_key\", Int64.Type}, {\"calendar_date\", type date}, {\"day_of_week\", Int64.Type}, {\"day_name\", type text}, {\"week_of_year\", Int64.Type}, {\"month\", Int64.Type}, {\"month_name\", type text}, {\"quarter\", Int64.Type}, {\"year\", Int64.Type}, {\"is_weekend\", type logical}, {\"is_crisis_period\", type logical}, {\"crisis_label\", type text}, {\"load_timestamp\", type datetime}, {\"_batch_id\", type text}})",
+                "in",
+                "    #\"Changed Type\""
+              ]
+            }
+          }
+        ],
+        "measures": []
+      },
+      {
+        "name": "dim_date_time",
+        "columns": [
+          {
+            "name": "date_time_key",
+            "dataType": "int64",
+            "sourceColumn": "date_time_key",
+            "formatString": "#,0"
+          },
+          {
+            "name": "date_key",
+            "dataType": "int64",
+            "sourceColumn": "date_key",
+            "formatString": "#,0"
+          },
+          {
+            "name": "calendar_date",
+            "dataType": "dateTime",
+            "sourceColumn": "calendar_date"
+          },
+          {
+            "name": "hour_of_day",
+            "dataType": "int64",
+            "sourceColumn": "hour_of_day",
+            "formatString": "#,0"
+          },
+          {
+            "name": "day_of_week",
+            "dataType": "int64",
+            "sourceColumn": "day_of_week",
+            "formatString": "#,0"
+          },
+          {
+            "name": "day_name",
+            "dataType": "string",
+            "sourceColumn": "day_name"
+          },
+          {
+            "name": "week_of_year",
+            "dataType": "string",
+            "sourceColumn": "week_of_year"
+          },
+          {
+            "name": "month",
+            "dataType": "string",
+            "sourceColumn": "month"
+          },
+          {
+            "name": "quarter",
+            "dataType": "string",
+            "sourceColumn": "quarter"
+          },
+          {
+            "name": "year",
+            "dataType": "string",
+            "sourceColumn": "year"
+          },
+          {
+            "name": "is_weekend",
+            "dataType": "string",
+            "sourceColumn": "is_weekend"
+          },
+          {
+            "name": "is_crisis_period",
+            "dataType": "string",
+            "sourceColumn": "is_crisis_period"
+          },
+          {
+            "name": "crisis_label",
+            "dataType": "string",
+            "sourceColumn": "crisis_label"
+          },
+          {
+            "name": "load_timestamp",
+            "dataType": "dateTime",
+            "sourceColumn": "load_timestamp"
+          },
+          {
+            "name": "_batch_id",
+            "dataType": "string",
+            "sourceColumn": "_batch_id"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "dim_date_time",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Csv.Document(File.Contents(\"D:\\\\Semester Projects\\\\Panopticon\\\\data\\\\powerbi_export\\\\dim_date_time.csv\"), [Delimiter=\",\", Columns=15, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),",
+                "    #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),",
+                "    #\"Changed Type\" = Table.TransformColumnTypes(#\"Promoted Headers\", {{\"date_time_key\", Int64.Type}, {\"date_key\", Int64.Type}, {\"calendar_date\", type date}, {\"hour_of_day\", Int64.Type}, {\"day_of_week\", Int64.Type}, {\"day_name\", type text}, {\"week_of_year\", type text}, {\"month\", type text}, {\"quarter\", type text}, {\"year\", type text}, {\"is_weekend\", type text}, {\"is_crisis_period\", type text}, {\"crisis_label\", type text}, {\"load_timestamp\", type datetime}, {\"_batch_id\", type text}})",
+                "in",
+                "    #\"Changed Type\""
+              ]
+            }
+          }
+        ],
+        "measures": []
+      },
+      {
+        "name": "dim_isp_telecom",
+        "columns": [
+          {
+            "name": "asn_id",
+            "dataType": "string",
+            "sourceColumn": "asn_id"
+          },
+          {
+            "name": "asn_number",
+            "dataType": "string",
+            "sourceColumn": "asn_number"
+          },
+          {
+            "name": "provider_name",
+            "dataType": "string",
+            "sourceColumn": "provider_name"
+          },
+          {
+            "name": "ownership_type",
+            "dataType": "string",
+            "sourceColumn": "ownership_type"
+          },
+          {
+            "name": "country_code",
+            "dataType": "string",
+            "sourceColumn": "country_code"
+          },
+          {
+            "name": "load_timestamp",
+            "dataType": "dateTime",
+            "sourceColumn": "load_timestamp"
+          },
+          {
+            "name": "_batch_id",
+            "dataType": "string",
+            "sourceColumn": "_batch_id"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "dim_isp_telecom",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Csv.Document(File.Contents(\"D:\\\\Semester Projects\\\\Panopticon\\\\data\\\\powerbi_export\\\\dim_isp_telecom.csv\"), [Delimiter=\",\", Columns=7, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),",
+                "    #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),",
+                "    #\"Changed Type\" = Table.TransformColumnTypes(#\"Promoted Headers\", {{\"asn_id\", type text}, {\"asn_number\", type text}, {\"provider_name\", type text}, {\"ownership_type\", type text}, {\"country_code\", type text}, {\"load_timestamp\", type datetime}, {\"_batch_id\", type text}})",
+                "in",
+                "    #\"Changed Type\""
+              ]
+            }
+          }
+        ],
+        "measures": []
+      },
+      {
+        "name": "fact_network_measurement",
+        "columns": [
+          {
+            "name": "measurement_id",
+            "dataType": "string",
+            "sourceColumn": "measurement_id"
+          },
+          {
+            "name": "date_time_key",
+            "dataType": "int64",
+            "sourceColumn": "date_time_key",
+            "formatString": "#,0"
+          },
+          {
+            "name": "date_key",
+            "dataType": "int64",
+            "sourceColumn": "date_key",
+            "formatString": "#,0"
+          },
+          {
+            "name": "calendar_date",
+            "dataType": "dateTime",
+            "sourceColumn": "calendar_date"
+          },
+          {
+            "name": "country_code",
+            "dataType": "string",
+            "sourceColumn": "country_code"
+          },
+          {
+            "name": "asn_id",
+            "dataType": "string",
+            "sourceColumn": "asn_id"
+          },
+          {
+            "name": "category_code",
+            "dataType": "string",
+            "sourceColumn": "category_code"
+          },
+          {
+            "name": "test_name",
+            "dataType": "string",
+            "sourceColumn": "test_name"
+          },
+          {
+            "name": "test_family",
+            "dataType": "string",
+            "sourceColumn": "test_family"
+          },
+          {
+            "name": "target_domain",
+            "dataType": "string",
+            "sourceColumn": "target_domain"
+          },
+          {
+            "name": "tampering_vector",
+            "dataType": "string",
+            "sourceColumn": "tampering_vector"
+          },
+          {
+            "name": "classification_status",
+            "dataType": "string",
+            "sourceColumn": "classification_status"
+          },
+          {
+            "name": "is_anomaly_flag",
+            "dataType": "int64",
+            "sourceColumn": "is_anomaly_flag",
+            "formatString": "#,0"
+          },
+          {
+            "name": "dns_anomaly_flag",
+            "dataType": "int64",
+            "sourceColumn": "dns_anomaly_flag",
+            "formatString": "#,0"
+          },
+          {
+            "name": "tcp_anomaly_flag",
+            "dataType": "int64",
+            "sourceColumn": "tcp_anomaly_flag",
+            "formatString": "#,0"
+          },
+          {
+            "name": "tls_anomaly_flag",
+            "dataType": "int64",
+            "sourceColumn": "tls_anomaly_flag",
+            "formatString": "#,0"
+          },
+          {
+            "name": "http_anomaly_flag",
+            "dataType": "int64",
+            "sourceColumn": "http_anomaly_flag",
+            "formatString": "#,0"
+          },
+          {
+            "name": "ooni_anomaly_flag",
+            "dataType": "int64",
+            "sourceColumn": "ooni_anomaly_flag",
+            "formatString": "#,0"
+          },
+          {
+            "name": "ooni_confirmed_flag",
+            "dataType": "int64",
+            "sourceColumn": "ooni_confirmed_flag",
+            "formatString": "#,0"
+          },
+          {
+            "name": "test_runtime_seconds",
+            "dataType": "double",
+            "sourceColumn": "test_runtime_seconds",
+            "formatString": "0.00"
+          },
+          {
+            "name": "taxonomy_version",
+            "dataType": "string",
+            "sourceColumn": "taxonomy_version"
+          },
+          {
+            "name": "event_timestamp",
+            "dataType": "dateTime",
+            "sourceColumn": "event_timestamp"
+          },
+          {
+            "name": "load_timestamp",
+            "dataType": "dateTime",
+            "sourceColumn": "load_timestamp"
+          },
+          {
+            "name": "_batch_id",
+            "dataType": "string",
+            "sourceColumn": "_batch_id"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "fact_network_measurement",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Csv.Document(File.Contents(\"D:\\\\Semester Projects\\\\Panopticon\\\\data\\\\powerbi_export\\\\fact_network_measurement.csv\"), [Delimiter=\",\", Columns=24, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),",
+                "    #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),",
+                "    #\"Changed Type\" = Table.TransformColumnTypes(#\"Promoted Headers\", {{\"measurement_id\", type text}, {\"date_time_key\", Int64.Type}, {\"date_key\", Int64.Type}, {\"calendar_date\", type date}, {\"country_code\", type text}, {\"asn_id\", type text}, {\"category_code\", type text}, {\"test_name\", type text}, {\"test_family\", type text}, {\"target_domain\", type text}, {\"tampering_vector\", type text}, {\"classification_status\", type text}, {\"is_anomaly_flag\", Int64.Type}, {\"dns_anomaly_flag\", Int64.Type}, {\"tcp_anomaly_flag\", Int64.Type}, {\"tls_anomaly_flag\", Int64.Type}, {\"http_anomaly_flag\", Int64.Type}, {\"ooni_anomaly_flag\", Int64.Type}, {\"ooni_confirmed_flag\", Int64.Type}, {\"test_runtime_seconds\", type number}, {\"taxonomy_version\", type text}, {\"event_timestamp\", type datetime}, {\"load_timestamp\", type datetime}, {\"_batch_id\", type text}})",
+                "in",
+                "    #\"Changed Type\""
+              ]
+            }
+          }
+        ],
+        "measures": [
+          {
+            "name": "Measurement Probes",
+            "expression": "COUNTROWS(fact_network_measurement)",
+            "formatString": "#,0"
+          },
+          {
+            "name": "Anomalous Probes",
+            "expression": "CALCULATE(COUNTROWS(fact_network_measurement), fact_network_measurement[is_anomaly_flag] = 1)",
+            "formatString": "#,0"
+          },
+          {
+            "name": "TCP RST Count",
+            "expression": "CALCULATE(COUNTROWS(fact_network_measurement), fact_network_measurement[tcp_anomaly_flag] = 1)",
+            "formatString": "#,0"
+          },
+          {
+            "name": "DNS Tamper Count",
+            "expression": "CALCULATE(COUNTROWS(fact_network_measurement), fact_network_measurement[dns_anomaly_flag] = 1)",
+            "formatString": "#,0"
+          },
+          {
+            "name": "HTTP Block Count",
+            "expression": "CALCULATE(COUNTROWS(fact_network_measurement), fact_network_measurement[http_anomaly_flag] = 1)",
+            "formatString": "#,0"
+          },
+          {
+            "name": "TLS Drop Count",
+            "expression": "CALCULATE(COUNTROWS(fact_network_measurement), fact_network_measurement[tls_anomaly_flag] = 1)",
+            "formatString": "#,0"
+          },
+          {
+            "name": "CAI %",
+            "expression": "DIVIDE([Anomalous Probes], [Measurement Probes], 0)",
+            "formatString": "0.0%"
+          },
+          {
+            "name": "Confirmed Probes",
+            "expression": "CALCULATE(COUNTROWS(fact_network_measurement), fact_network_measurement[ooni_confirmed_flag] = 1)",
+            "formatString": "#,0"
+          }
+        ]
+      },
+      {
+        "name": "pipeline_execution_logs",
+        "columns": [
+          {
+            "name": "log_id",
+            "dataType": "string",
+            "sourceColumn": "log_id"
+          },
+          {
+            "name": "pipeline_layer",
+            "dataType": "string",
+            "sourceColumn": "pipeline_layer"
+          },
+          {
+            "name": "batch_parameter",
+            "dataType": "string",
+            "sourceColumn": "batch_parameter"
+          },
+          {
+            "name": "load_type",
+            "dataType": "string",
+            "sourceColumn": "load_type"
+          },
+          {
+            "name": "start_time",
+            "dataType": "dateTime",
+            "sourceColumn": "start_time"
+          },
+          {
+            "name": "end_time",
+            "dataType": "dateTime",
+            "sourceColumn": "end_time"
+          },
+          {
+            "name": "duration_seconds",
+            "dataType": "double",
+            "sourceColumn": "duration_seconds",
+            "formatString": "0.00"
+          },
+          {
+            "name": "status",
+            "dataType": "string",
+            "sourceColumn": "status"
+          },
+          {
+            "name": "rows_read",
+            "dataType": "int64",
+            "sourceColumn": "rows_read",
+            "formatString": "#,0"
+          },
+          {
+            "name": "rows_inserted",
+            "dataType": "int64",
+            "sourceColumn": "rows_inserted",
+            "formatString": "#,0"
+          },
+          {
+            "name": "rows_updated",
+            "dataType": "int64",
+            "sourceColumn": "rows_updated",
+            "formatString": "#,0"
+          },
+          {
+            "name": "rows_quarantined",
+            "dataType": "int64",
+            "sourceColumn": "rows_quarantined",
+            "formatString": "#,0"
+          },
+          {
+            "name": "error_message",
+            "dataType": "string",
+            "sourceColumn": "error_message"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "pipeline_execution_logs",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Csv.Document(File.Contents(\"D:\\\\Semester Projects\\\\Panopticon\\\\data\\\\powerbi_export\\\\pipeline_execution_logs.csv\"), [Delimiter=\",\", Columns=13, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),",
+                "    #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),",
+                "    #\"Changed Type\" = Table.TransformColumnTypes(#\"Promoted Headers\", {{\"log_id\", type text}, {\"pipeline_layer\", type text}, {\"batch_parameter\", type text}, {\"load_type\", type text}, {\"start_time\", type datetime}, {\"end_time\", type datetime}, {\"duration_seconds\", type number}, {\"status\", type text}, {\"rows_read\", Int64.Type}, {\"rows_inserted\", Int64.Type}, {\"rows_updated\", Int64.Type}, {\"rows_quarantined\", Int64.Type}, {\"error_message\", type text}})",
+                "in",
+                "    #\"Changed Type\""
+              ]
+            }
+          }
+        ],
+        "measures": [
+          {
+            "name": "Total Audit Logs",
+            "expression": "COUNTROWS(pipeline_execution_logs)",
+            "formatString": "#,0"
+          },
+          {
+            "name": "ACID Success Rate %",
+            "expression": "DIVIDE(CALCULATE(COUNTROWS(pipeline_execution_logs), pipeline_execution_logs[status] = \"Success\"), COUNTROWS(pipeline_execution_logs), 1)",
+            "formatString": "0.0%"
+          },
+          {
+            "name": "Mean Batch Duration Sec",
+            "expression": "AVERAGEX(pipeline_execution_logs, VALUE(pipeline_execution_logs[duration_seconds]))",
+            "formatString": "0.0s"
+          },
+          {
+            "name": "Total Rows Inserted",
+            "expression": "SUMX(pipeline_execution_logs, VALUE(pipeline_execution_logs[rows_inserted]))",
+            "formatString": "#,0"
+          },
+          {
+            "name": "Total Rows Read",
+            "expression": "SUMX(pipeline_execution_logs, VALUE(pipeline_execution_logs[rows_read]))",
+            "formatString": "#,0"
+          },
+          {
+            "name": "Total Quarantined",
+            "expression": "SUMX(pipeline_execution_logs, VALUE(pipeline_execution_logs[rows_quarantined]))",
+            "formatString": "#,0"
+          },
+          {
+            "name": "Total Cloud Spend USD",
+            "expression": "0.00",
+            "formatString": "\"$\"#,##0.00"
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "name": "daily_to_date",
+        "fromTable": "agg_daily_censorship_severity",
+        "fromColumn": "date_key",
+        "toTable": "dim_date",
+        "toColumn": "date_key"
+      },
+      {
+        "name": "daily_to_isp",
+        "fromTable": "agg_daily_censorship_severity",
+        "fromColumn": "asn_id",
+        "toTable": "dim_isp_telecom",
+        "toColumn": "asn_id"
+      },
+      {
+        "name": "daily_to_content",
+        "fromTable": "agg_daily_censorship_severity",
+        "fromColumn": "category_code",
+        "toTable": "dim_content_category",
+        "toColumn": "category_code"
+      },
+      {
+        "name": "daily_to_country",
+        "fromTable": "agg_daily_censorship_severity",
+        "fromColumn": "country_code",
+        "toTable": "dim_country_region",
+        "toColumn": "country_code"
+      },
+      {
+        "name": "fact_to_date",
+        "fromTable": "fact_network_measurement",
+        "fromColumn": "date_key",
+        "toTable": "dim_date",
+        "toColumn": "date_key"
+      },
+      {
+        "name": "fact_to_isp",
+        "fromTable": "fact_network_measurement",
+        "fromColumn": "asn_id",
+        "toTable": "dim_isp_telecom",
+        "toColumn": "asn_id"
+      },
+      {
+        "name": "fact_to_content",
+        "fromTable": "fact_network_measurement",
+        "fromColumn": "category_code",
+        "toTable": "dim_content_category",
+        "toColumn": "category_code"
+      },
+      {
+        "name": "fact_to_time",
+        "fromTable": "fact_network_measurement",
+        "fromColumn": "date_time_key",
+        "toTable": "dim_date_time",
+        "toColumn": "date_time_key"
+      },
+      {
+        "name": "fact_to_country",
+        "fromTable": "fact_network_measurement",
+        "fromColumn": "country_code",
+        "toTable": "dim_country_region",
+        "toColumn": "country_code"
+      },
+      {
+        "name": "hourly_to_time",
+        "fromTable": "agg_hourly_censorship_severity",
+        "fromColumn": "date_time_key",
+        "toTable": "dim_date_time",
+        "toColumn": "date_time_key"
+      },
+      {
+        "name": "hourly_to_country",
+        "fromTable": "agg_hourly_censorship_severity",
+        "fromColumn": "country_code",
+        "toTable": "dim_country_region",
+        "toColumn": "country_code"
+      }
+    ]
+  }
+}

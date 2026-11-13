@@ -28,6 +28,58 @@
         "  *\n",
         "FROM\n",
         "  delta.`/Volumes/workspace/default/panopticon/gold/agg_daily_censorship_severity`"
+      ],
+      "columns": [
+        {
+          "displayName": "targeted_political_blocks",
+          "description": "Confirmed political censorship blocks targeting political content categories",
+          "expression": "SUM(CASE WHEN `category_code` IN ('POLR', 'HUMR', 'NEWS', 'LGBT', 'MMED') THEN `confirmed_blocked_count` ELSE 0 END)"
+        },
+        {
+          "displayName": "collateral_commerce_disruptions",
+          "description": "Interference signals affecting commerce and e-commerce infrastructure (collateral damage)",
+          "expression": "SUM(CASE WHEN `category_code` IN ('COMM', 'ECON', 'FILE', 'GAME') THEN `interference_signal_count` ELSE 0 END)"
+        },
+        {
+          "displayName": "surgical_precision_index",
+          "description": "Ratio of targeted political blocks to collateral commerce disruptions (100 = perfectly surgical, 1:1 at parity, <1 = more collateral damage than surgical blocking)",
+          "expression": "100.0 * SUM(CASE WHEN `category_code` IN ('POLR', 'HUMR', 'NEWS', 'LGBT', 'MMED') THEN `confirmed_blocked_count` ELSE 0 END) / NULLIF(SUM(CASE WHEN `category_code` IN ('COMM', 'ECON', 'FILE', 'GAME') THEN `interference_signal_count` ELSE 0 END), 0)"
+        },
+        {
+          "displayName": "l34_tcp_resets",
+          "description": "Layer 3/4 transport-layer interference: TCP reset injections",
+          "expression": "SUM(`tcp_reset_count`)"
+        },
+        {
+          "displayName": "l7_tampering_total",
+          "description": "Layer 7 application-layer tampering: DNS + TLS + HTTP vectors",
+          "expression": "SUM(`dns_tampering_count`) + SUM(`tls_drop_count`) + SUM(`http_block_count`)"
+        },
+        {
+          "displayName": "l7_share_pct",
+          "description": "Share of classified attack volume attributable to Layer 7 application-layer vectors (DNS, TLS, HTTP) vs Layer 3/4 TCP resets",
+          "expression": "100.0 * (SUM(`dns_tampering_count`) + SUM(`tls_drop_count`) + SUM(`http_block_count`)) / NULLIF(SUM(`dns_tampering_count`) + SUM(`tcp_reset_count`) + SUM(`tls_drop_count`) + SUM(`http_block_count`), 0)"
+        },
+        {
+          "displayName": "tcp_reset_share_pct",
+          "description": "TCP reset injections as a share of total measurements for the ISP — proxy for on-path DPI enforcement capability",
+          "expression": "100.0 * SUM(`tcp_reset_count`) / NULLIF(SUM(`total_measurements`), 0)"
+        },
+        {
+          "displayName": "dns_tamper_share_pct",
+          "description": "DNS tampering as a share of total measurements for the ISP — low-capability filtering fingerprint",
+          "expression": "100.0 * SUM(`dns_tampering_count`) / NULLIF(SUM(`total_measurements`), 0)"
+        },
+        {
+          "displayName": "tls_drop_share_pct",
+          "description": "TLS drop share of total measurements for the ISP — deep-packet inspection of encrypted traffic",
+          "expression": "100.0 * SUM(`tls_drop_count`) / NULLIF(SUM(`total_measurements`), 0)"
+        },
+        {
+          "displayName": "unclassified_share_pct",
+          "description": "Unclassified anomalies as a share of total measurements for the ISP — unexplained network interference",
+          "expression": "100.0 * SUM(`anomaly_unclassified_count`) / NULLIF(SUM(`total_measurements`), 0)"
+        }
       ]
     },
     {
@@ -146,6 +198,50 @@
         "GROUP BY\n",
         "  test_family"
       ]
+    },
+    {
+      "name": "blackout_predictor",
+      "displayName": "Blackout Predictor",
+      "config": {
+        "version": "1.1",
+        "source": "WITH hourly AS (\n  SELECT\n    date_time_key,\n    MAX(country_code) AS country_code,\n    MAX(calendar_date) AS calendar_date,\n    MAX(hour_of_day) AS hour_of_day,\n    SUM(total_measurements) AS total_measurements\n  FROM delta.`/Volumes/workspace/default/panopticon/gold/agg_hourly_censorship_severity`\n  GROUP BY date_time_key\n),\nscored AS (\n  SELECT\n    date_time_key,\n    country_code,\n    calendar_date,\n    hour_of_day,\n    total_measurements,\n    AVG(total_measurements) OVER w AS rolling_mean,\n    STDDEV_SAMP(total_measurements) OVER w AS rolling_std\n  FROM hourly\n  WINDOW w AS (ORDER BY date_time_key ROWS BETWEEN 168 PRECEDING AND 1 PRECEDING)\n)\nSELECT\n  date_time_key,\n  country_code,\n  calendar_date,\n  hour_of_day,\n  total_measurements,\n  COALESCE(rolling_mean, CAST(total_measurements AS DOUBLE)) AS rolling_mean,\n  COALESCE(rolling_std, 0.0) AS rolling_std,\n  CASE\n    WHEN COALESCE(rolling_std, 0.0) = 0 THEN 0.0\n    ELSE (total_measurements - COALESCE(rolling_mean, CAST(total_measurements AS DOUBLE))) / rolling_std\n  END AS z_score,\n  CASE\n    WHEN total_measurements = 0 THEN 1\n    WHEN COALESCE(rolling_std, 0.0) > 0 AND (total_measurements - COALESCE(rolling_mean, CAST(total_measurements AS DOUBLE))) / rolling_std <= -2.0 THEN 1\n    ELSE 0\n  END AS blackout_risk_flag,\n  CASE\n    WHEN total_measurements = 0 THEN 'BLACKOUT'\n    WHEN COALESCE(rolling_std, 0.0) > 0 AND (total_measurements - COALESCE(rolling_mean, CAST(total_measurements AS DOUBLE))) / rolling_std <= -2.0 THEN 'RISK'\n    ELSE 'NORMAL'\n  END AS risk_status\nFROM scored",
+        "dimensions": [
+          {
+            "name": "date_time_key",
+            "expr": "`date_time_key`"
+          },
+          {
+            "name": "calendar_date",
+            "expr": "`calendar_date`"
+          },
+          {
+            "name": "hour_of_day",
+            "expr": "`hour_of_day`"
+          },
+          {
+            "name": "risk_status",
+            "expr": "`risk_status`"
+          }
+        ],
+        "measures": [
+          {
+            "name": "total_measurements",
+            "expr": "SUM(`total_measurements`)"
+          },
+          {
+            "name": "avg_z_score",
+            "expr": "AVG(`z_score`)"
+          },
+          {
+            "name": "min_z_score",
+            "expr": "MIN(`z_score`)"
+          },
+          {
+            "name": "blackout_risk_hours",
+            "expr": "SUM(`blackout_risk_flag`)"
+          }
+        ]
+      }
     }
   ],
   "relationshipGraphs": [
@@ -190,6 +286,10 @@
         {
           "name": "Attack_Vector_Breakdown",
           "datasetName": "attack_vectors"
+        },
+        {
+          "name": "Blackout_Predictor",
+          "datasetName": "blackout_predictor"
         }
       ],
       "relationships": [
@@ -1365,6 +1465,1192 @@
             "x": 8,
             "y": 9,
             "width": 4,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "censorship_intel",
+      "displayName": "Censorship Intelligence",
+      "layout": [
+        {
+          "widget": {
+            "name": "q1_header",
+            "spec": {
+              "version": 1,
+              "widgetType": "text",
+              "encodings": {
+                "text": {
+                  "fields": [],
+                  "lines": [
+                    "## 1 · Regulatory Enforcement Latency",
+                    "Which ISPs comply immediately with state ban directives, which delay or resist, and which lack technical DPI infrastructure? State-owned providers are expected to enforce fastest; private ISPs in press-restricted states may delay or leak.",
+                    "**Compliance rank =** confirmed enforcement rate · **Technical capability =** DPI complexity mix (TCP reset + TLS drops = on-path DPI; DNS-only = low-capability filtering) · **Delay profile =** onset speed after the first blocking signal in each state."
+                  ]
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "enforcement_onset",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "ISPTelecom_Dimension__ownership_type",
+                      "expression": "`ISPTelecom_Dimension`.`ownership_type`"
+                    },
+                    {
+                      "name": "Daily_Censorship_Aggregation__calendar_date",
+                      "expression": "`Daily_Censorship_Aggregation`.`calendar_date`"
+                    },
+                    {
+                      "name": "avg(Daily_Censorship_Aggregation__confirmed_rate_pct)",
+                      "expression": "AVG(`Daily_Censorship_Aggregation`.`confirmed_rate_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Enforcement Onset by Ownership"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "Daily_Censorship_Aggregation__calendar_date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(Daily_Censorship_Aggregation__confirmed_rate_pct)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "ISPTelecom_Dimension__ownership_type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "q2_header",
+            "spec": {
+              "version": 1,
+              "widgetType": "text",
+              "encodings": {
+                "text": {
+                  "fields": [],
+                  "lines": [
+                    "## 2 · Surgical Censorship vs Collateral Damage",
+                    "Empirical ratio of targeted political blocks to unintended disruptions in domestic banking and e-commerce infrastructure.",
+                    "**Targeted =** confirmed blocks of political, human-rights, news, LGBT and media categories · **Collateral =** interference signals on commerce, e-commerce, file-sharing and gaming infrastructure · **Precision index =** targeted ÷ collateral × 100 (≥100 surgical, <1 collateral dominates)."
+                  ]
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_targeted",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "measure(Daily_Censorship_Aggregation__targeted_political_blocks)",
+                      "expression": "MEASURE(`Daily_Censorship_Aggregation`.`targeted_political_blocks`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Targeted Political Blocks"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Daily_Censorship_Aggregation__targeted_political_blocks)",
+                  "format": {
+                    "abbreviation": "compact",
+                    "type": "number-plain"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_collateral",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "measure(Daily_Censorship_Aggregation__collateral_commerce_disruptions)",
+                      "expression": "MEASURE(`Daily_Censorship_Aggregation`.`collateral_commerce_disruptions`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Collateral Commerce Disruptions"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Daily_Censorship_Aggregation__collateral_commerce_disruptions)",
+                  "format": {
+                    "abbreviation": "compact",
+                    "type": "number-plain"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 16,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "interference_by_group",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Content_Category_Dimension__category_group",
+                      "expression": "`Content_Category_Dimension`.`category_group`"
+                    },
+                    {
+                      "name": "sum(Daily_Censorship_Aggregation__interference_signal_count)",
+                      "expression": "SUM(`Daily_Censorship_Aggregation`.`interference_signal_count`)"
+                    },
+                    {
+                      "name": "sum(Daily_Censorship_Aggregation__confirmed_blocked_count)",
+                      "expression": "SUM(`Daily_Censorship_Aggregation`.`confirmed_blocked_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Interference by Content Group"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Content_Category_Dimension__category_group",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fields": [
+                    {
+                      "fieldName": "sum(Daily_Censorship_Aggregation__interference_signal_count)"
+                    },
+                    {
+                      "fieldName": "sum(Daily_Censorship_Aggregation__confirmed_blocked_count)"
+                    }
+                  ],
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 19,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "political_vs_commerce",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Content_Category_Dimension__category_group",
+                      "expression": "`Content_Category_Dimension`.`category_group`"
+                    },
+                    {
+                      "name": "Daily_Censorship_Aggregation__calendar_date",
+                      "expression": "`Daily_Censorship_Aggregation`.`calendar_date`"
+                    },
+                    {
+                      "name": "sum(Daily_Censorship_Aggregation__interference_signal_count)",
+                      "expression": "SUM(`Daily_Censorship_Aggregation`.`interference_signal_count`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`Content_Category_Dimension`.`category_group` IN ('POLITICAL_AND_NEWS', 'RIGHTS_AND_ADVOCACY', 'COMMUNICATION_AND_SOCIAL', 'COMMERCE_AND_ENTERTAINMENT')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Political vs Commerce Timeline",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "Daily_Censorship_Aggregation__calendar_date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(Daily_Censorship_Aggregation__interference_signal_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Content_Category_Dimension__category_group",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 19,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "q3_header",
+            "spec": {
+              "version": 1,
+              "widgetType": "text",
+              "encodings": {
+                "text": {
+                  "fields": [],
+                  "lines": [
+                    "## 3 · Attack Vector Fingerprints",
+                    "Categorising Layer 3/4 TCP reset injections against Layer 7 DNS/TLS/HTTP tampering across countries and test families.",
+                    "**L3/4 =** TCP resets injected mid-stream by on-path DPI · **L7 =** DNS resolution tampering, TLS drops, HTTP blocks — the censor's visible application-layer fingerprint. The L7 share distinguishes DNS-poisoning regimes from blunt TCP-reset regimes."
+                  ]
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 26,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_l34",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "measure(Daily_Censorship_Aggregation__l34_tcp_resets)",
+                      "expression": "MEASURE(`Daily_Censorship_Aggregation`.`l34_tcp_resets`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "L3/4 TCP Resets"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Daily_Censorship_Aggregation__l34_tcp_resets)",
+                  "format": {
+                    "abbreviation": "compact",
+                    "type": "number-plain"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 28,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_l7",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "measure(Daily_Censorship_Aggregation__l7_tampering_total)",
+                      "expression": "MEASURE(`Daily_Censorship_Aggregation`.`l7_tampering_total`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "L7 DNS/TLS/HTTP Events"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Daily_Censorship_Aggregation__l7_tampering_total)",
+                  "format": {
+                    "abbreviation": "compact",
+                    "type": "number-plain"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 28,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "vector_by_family",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Attack_Vector_Breakdown__vector_type",
+                      "expression": "`Attack_Vector_Breakdown`.`vector_type`"
+                    },
+                    {
+                      "name": "Attack_Vector_Breakdown__test_family",
+                      "expression": "`Attack_Vector_Breakdown`.`test_family`"
+                    },
+                    {
+                      "name": "sum(Attack_Vector_Breakdown__count)",
+                      "expression": "SUM(`Attack_Vector_Breakdown`.`count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Attack Vectors by Test Family"
+              },
+              "version": 3,
+              "mark": {
+                "layout": "stack"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Attack_Vector_Breakdown__test_family",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(Attack_Vector_Breakdown__count)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Attack_Vector_Breakdown__vector_type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 31,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "q4_header",
+            "spec": {
+              "version": 1,
+              "widgetType": "text",
+              "encodings": {
+                "text": {
+                  "fields": [],
+                  "lines": [
+                    "## 4 · Crisis Timeline & Blackout Predictor",
+                    "Detecting measurement collapse using a 168-hour rolling Z-score of nationwide hourly measurement volume. A sudden volume drop signals likely internet shutdowns, transnational surveillance pushes, or state-mandated filtering drives.",
+                    "**RISK =** volume ≥2σ below the trailing week average · **BLACKOUT =** total measurement collapse · flagged hours form the early-warning watchlist for crisis-period escalation analysis."
+                  ]
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 38,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "crisis_timeline",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Blackout_Predictor__calendar_date",
+                      "expression": "`Blackout_Predictor`.`calendar_date`"
+                    },
+                    {
+                      "name": "measure(Blackout_Predictor__total_measurements)",
+                      "expression": "MEASURE(`Blackout_Predictor`.`total_measurements`)"
+                    },
+                    {
+                      "name": "measure(Blackout_Predictor__blackout_risk_hours)",
+                      "expression": "MEASURE(`Blackout_Predictor`.`blackout_risk_hours`)"
+                    },
+                    {
+                      "name": "measure(Blackout_Predictor__avg_z_score)",
+                      "expression": "MEASURE(`Blackout_Predictor`.`avg_z_score`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Nationwide Crisis Timeline"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "Blackout_Predictor__calendar_date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "primary": {
+                    "fields": [
+                      {
+                        "fieldName": "measure(Blackout_Predictor__total_measurements)"
+                      },
+                      {
+                        "fieldName": "measure(Blackout_Predictor__blackout_risk_hours)"
+                      }
+                    ],
+                    "scale": {
+                      "type": "quantitative"
+                    }
+                  },
+                  "secondary": {
+                    "fields": [
+                      {
+                        "fieldName": "measure(Blackout_Predictor__avg_z_score)"
+                      }
+                    ],
+                    "scale": {
+                      "type": "quantitative"
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 40,
+            "width": 8,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "risk_hours_by_day",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Blackout_Predictor__calendar_date",
+                      "expression": "`Blackout_Predictor`.`calendar_date`"
+                    },
+                    {
+                      "name": "measure(Blackout_Predictor__blackout_risk_hours)",
+                      "expression": "MEASURE(`Blackout_Predictor`.`blackout_risk_hours`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Blackout Risk Hours by Day"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Blackout_Predictor__calendar_date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(Blackout_Predictor__blackout_risk_hours)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 46,
+            "width": 12,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "isp_compliance_rank",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "avg(Daily_Censorship_Aggregation__confirmed_rate_pct)",
+                      "expression": "AVG(`Daily_Censorship_Aggregation`.`confirmed_rate_pct`)"
+                    },
+                    {
+                      "name": "ISPTelecom_Dimension__provider_name",
+                      "expression": "`ISPTelecom_Dimension`.`provider_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "ISP Compliance Rank",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "avg(Daily_Censorship_Aggregation__confirmed_rate_pct)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "ISPTelecom_Dimension__provider_name",
+                  "scale": {
+                    "categorySize": {
+                      "number": 12,
+                      "type": "number-of-categories"
+                    },
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "isp_dpi_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "ISPTelecom_Dimension__provider_name",
+                      "expression": "`ISPTelecom_Dimension`.`provider_name`"
+                    },
+                    {
+                      "name": "ISPTelecom_Dimension__ownership_type",
+                      "expression": "`ISPTelecom_Dimension`.`ownership_type`"
+                    },
+                    {
+                      "name": "sum(Daily_Censorship_Aggregation__total_measurements)",
+                      "expression": "SUM(`Daily_Censorship_Aggregation`.`total_measurements`)"
+                    },
+                    {
+                      "name": "avg(Daily_Censorship_Aggregation__confirmed_rate_pct)",
+                      "expression": "AVG(`Daily_Censorship_Aggregation`.`confirmed_rate_pct`)"
+                    },
+                    {
+                      "name": "avg(Daily_Censorship_Aggregation__interference_rate_pct)",
+                      "expression": "AVG(`Daily_Censorship_Aggregation`.`interference_rate_pct`)"
+                    },
+                    {
+                      "name": "measure(Daily_Censorship_Aggregation__tcp_reset_share_pct)",
+                      "expression": "MEASURE(`Daily_Censorship_Aggregation`.`tcp_reset_share_pct`)"
+                    },
+                    {
+                      "name": "measure(Daily_Censorship_Aggregation__dns_tamper_share_pct)",
+                      "expression": "MEASURE(`Daily_Censorship_Aggregation`.`dns_tamper_share_pct`)"
+                    },
+                    {
+                      "name": "measure(Daily_Censorship_Aggregation__tls_drop_share_pct)",
+                      "expression": "MEASURE(`Daily_Censorship_Aggregation`.`tls_drop_share_pct`)"
+                    },
+                    {
+                      "name": "measure(Daily_Censorship_Aggregation__unclassified_share_pct)",
+                      "expression": "MEASURE(`Daily_Censorship_Aggregation`.`unclassified_share_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "ISP DPI Capability &amp; Delay Profile",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "ISPTelecom_Dimension__provider_name"
+                  },
+                  {
+                    "fieldName": "ISPTelecom_Dimension__ownership_type"
+                  },
+                  {
+                    "fieldName": "sum(Daily_Censorship_Aggregation__total_measurements)"
+                  },
+                  {
+                    "fieldName": "avg(Daily_Censorship_Aggregation__confirmed_rate_pct)",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "max"
+                      },
+                      "type": "number-plain"
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  },
+                  {
+                    "fieldName": "avg(Daily_Censorship_Aggregation__interference_rate_pct)",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "max"
+                      },
+                      "type": "number-plain"
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  },
+                  {
+                    "fieldName": "measure(Daily_Censorship_Aggregation__tcp_reset_share_pct)",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "max"
+                      },
+                      "type": "number-plain"
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  },
+                  {
+                    "fieldName": "measure(Daily_Censorship_Aggregation__dns_tamper_share_pct)",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "max"
+                      },
+                      "type": "number-plain"
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  },
+                  {
+                    "fieldName": "measure(Daily_Censorship_Aggregation__tls_drop_share_pct)",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "max"
+                      },
+                      "type": "number-plain"
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  },
+                  {
+                    "fieldName": "measure(Daily_Censorship_Aggregation__unclassified_share_pct)",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "max"
+                      },
+                      "type": "number-plain"
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_precision",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "measure(Daily_Censorship_Aggregation__surgical_precision_index)",
+                      "expression": "MEASURE(`Daily_Censorship_Aggregation`.`surgical_precision_index`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showDescription": true,
+                "showTitle": true,
+                "title": "Surgical Precision Index",
+                "description": {
+                  "fields": [],
+                  "value": "Targeted ÷ collateral × 100 — ≥100 = surgical, <1 = collateral damage dominates"
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Daily_Censorship_Aggregation__surgical_precision_index)",
+                  "format": {
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "places": 1,
+                      "type": "max"
+                    },
+                    "type": "number-plain"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 16,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_l7_share",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "measure(Daily_Censorship_Aggregation__l7_share_pct)",
+                      "expression": "MEASURE(`Daily_Censorship_Aggregation`.`l7_share_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "L7 Share of Attack Volume"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Daily_Censorship_Aggregation__l7_share_pct)",
+                  "format": {
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "places": 1,
+                      "type": "max"
+                    },
+                    "type": "number-plain"
+                  },
+                  "formatTemplate": "{{ @formatted }}%"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 28,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "blackout_watchlist",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Blackout_Predictor__calendar_date",
+                      "expression": "`Blackout_Predictor`.`calendar_date`"
+                    },
+                    {
+                      "name": "Blackout_Predictor__hour_of_day",
+                      "expression": "`Blackout_Predictor`.`hour_of_day`"
+                    },
+                    {
+                      "name": "Blackout_Predictor__risk_status",
+                      "expression": "`Blackout_Predictor`.`risk_status`"
+                    },
+                    {
+                      "name": "measure(Blackout_Predictor__total_measurements)",
+                      "expression": "MEASURE(`Blackout_Predictor`.`total_measurements`)"
+                    },
+                    {
+                      "name": "measure(Blackout_Predictor__avg_z_score)",
+                      "expression": "MEASURE(`Blackout_Predictor`.`avg_z_score`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`Blackout_Predictor`.`risk_status` IN ('RISK', 'BLACKOUT')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Blackout Risk Watchlist"
+              },
+              "rowsPerPage": 15,
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Blackout_Predictor__calendar_date"
+                  },
+                  {
+                    "fieldName": "Blackout_Predictor__hour_of_day"
+                  },
+                  {
+                    "fieldName": "Blackout_Predictor__risk_status"
+                  },
+                  {
+                    "fieldName": "measure(Blackout_Predictor__total_measurements)"
+                  },
+                  {
+                    "fieldName": "measure(Blackout_Predictor__avg_z_score)",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 2,
+                        "type": "max"
+                      },
+                      "type": "number-plain"
+                    }
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 40,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "vector_by_country",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "CountryRegion_Dimension__country_name",
+                      "expression": "`CountryRegion_Dimension`.`country_name`"
+                    },
+                    {
+                      "name": "sum(Daily_Censorship_Aggregation__dns_tampering_count)",
+                      "expression": "SUM(`Daily_Censorship_Aggregation`.`dns_tampering_count`)"
+                    },
+                    {
+                      "name": "sum(Daily_Censorship_Aggregation__tcp_reset_count)",
+                      "expression": "SUM(`Daily_Censorship_Aggregation`.`tcp_reset_count`)"
+                    },
+                    {
+                      "name": "sum(Daily_Censorship_Aggregation__tls_drop_count)",
+                      "expression": "SUM(`Daily_Censorship_Aggregation`.`tls_drop_count`)"
+                    },
+                    {
+                      "name": "sum(Daily_Censorship_Aggregation__http_block_count)",
+                      "expression": "SUM(`Daily_Censorship_Aggregation`.`http_block_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Attack Vectors by Country"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "CountryRegion_Dimension__country_name",
+                  "scale": {
+                    "categorySize": {
+                      "number": 12,
+                      "type": "number-of-categories"
+                    },
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  }
+                },
+                "y": {
+                  "fields": [
+                    {
+                      "fieldName": "sum(Daily_Censorship_Aggregation__dns_tampering_count)"
+                    },
+                    {
+                      "fieldName": "sum(Daily_Censorship_Aggregation__tcp_reset_count)"
+                    },
+                    {
+                      "fieldName": "sum(Daily_Censorship_Aggregation__tls_drop_count)"
+                    },
+                    {
+                      "fieldName": "sum(Daily_Censorship_Aggregation__http_block_count)"
+                    }
+                  ],
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 31,
+            "width": 6,
             "height": 6
           }
         }

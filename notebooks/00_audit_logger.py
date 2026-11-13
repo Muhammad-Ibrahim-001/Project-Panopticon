@@ -89,6 +89,11 @@ def init_audit_log_table(spark: Optional[SparkSession] = None, log_path: Optiona
             empty_df = resolved_spark.createDataFrame([], AUDIT_LOG_SCHEMA)
             empty_df.write.format("delta").mode("ignore").save(target_path)
             print(f"[AuditLogger] Initialized Delta audit table at: {target_path}")
+        if "/Volumes/" in target_path:
+            try:
+                resolved_spark.sql(f"CREATE OR REPLACE VIEW pipeline_execution_logs AS SELECT * FROM delta.`{target_path}`")
+            except Exception:
+                pass
     except Exception as err:
         print(f"[AuditLogger Warning] Non-blocking init check at {target_path}: {err}")
 

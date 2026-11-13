@@ -35,7 +35,7 @@ Empirically benchmarked on live OONI archives: raw `.jsonl.gz` files expand by *
 * **Daily Incremental Load**: **~25 MB to 50 MB compressed / day** (~140 MB – 270 MB raw text, ~2,000 to 5,000 events / day).
 * **Late-Arriving Reconciliation**: Incremental loads scan a **3-day rolling lookback window ($T-3$ to $T$)** using Delta Lake `MERGE INTO`, reconciling late submissions from offline mobile probes and updating enriched taxonomy with zero duplicate rows.
 * **Instructor Runtime Mandate (Zero Manual Uploads)**: Under course specifications, no data is manually uploaded via the Databricks UI or local upload widgets. All raw telemetry and target taxonomy are fetched programmatically within Databricks notebooks using public REST endpoints (OONI Measurement API and Citizen Lab GitHub raw API).
-* **Empirical Validation**: Bronze ingestion empirically tested and verified on live Databricks Serverless Compute (Photon Engine) under Unity Catalog Volumes (`/Volumes/workspace/default/panopticon/`). Successfully ingested **547 records** across strategic surveillance targets (Iran `IR`: 497 records, Pakistan `PK`: 50 records) for partition `2026-09-27` with **0 corrupt records quarantined** and full operational audit logs.
+* **Empirical Validation**: The complete end-to-end Medallion pipeline (Bronze $\rightarrow$ Silver $\rightarrow$ Gold) has been executed and verified on live Databricks Serverless Compute (Photon Engine) under Unity Catalog Volumes (`/Volumes/workspace/default/panopticon/`) across **63 logged executions** (Master Orchestration Run `976063331961030`). The pipeline ingested 1,000 raw OONI probe measurements, parsed and conformed 5,535 records across Silver child tables, and built 1,717 Gold dimensional records (Star Schema fact/dims and CAI severity marts) with **82.5% strict ACID commit success** and **$0.00 student cloud spend**.
 
 ---
 
@@ -49,14 +49,23 @@ Project-Panopticon/
 ├── panopticon_remediation_plan.md             # Phased engineering roadmap & compliance tracking
 ├── panopticon_adversarial_review.md           # Senior staff architectural review & threat models
 ├── bronze_layer_engineering_audit.md          # 12-dimension technical audit of Bronze ingestion
+├── silver_layer_engineering_audit.md          # 53-dimension technical audit of Silver layer
+├── dashboards/                                # Production Power BI Watchtower developer project
+│   ├── Panopticon_Dashboard.pbip              # Power BI Desktop Project entry point
+│   ├── Panopticon_Dashboard.Report/           # Visual layout, containers & executive theme
+│   │   ├── definition.pbir                    # Report definition binding
+│   │   └── report.json                        # 4-page executive surveillance dashboard layout
+│   └── Panopticon_Dashboard.SemanticModel/    # VertiPaq Star Schema data model & DAX metrics
+│       ├── definition.pbism                   # Semantic model binding
+│       └── model.bim                          # Tabular schema, M partitions, relationships & DAX
 ├── Docs/                                      # Structured documentation suite
 │   ├── .docx/                                 # Word documents for academic submission
 │   │   └── phase1_proposal.docx               # Executive Word Document Version
 │   ├── Phase 1/                               # Phase 1: Inception & Domain Proposal
-│   │   └── phase1_proposal.md                 # Formal Phase 1 Project Proposal
+│   │   └── phase1_proposal.md                 # Formal Phase 1 Project Proposal (with Figures 3a–3d)
 │   ├── Phase 2/                               # Phase 2: Ingestion, Silver & Governance
 │   │   ├── phase2_implementation_plan.md      # Technical blueprint & instructor requirements
-│   │   ├── 06_data_dictionary.md              # Comprehensive Bronze & Silver Data Dictionaries
+│   │   ├── 06_data_dictionary.md              # Comprehensive Bronze, Silver & Gold Data Dictionaries
 │   │   └── 07_execution_guide.md              # Parameterized execution & backfill manual
 │   ├── Future & Reference/                    # Architecture, Curriculum & Defense Guides
 │   │   ├── 01_architectures_and_tech_stacks.md # Architecture & Cloud Trade-Off Evaluation
@@ -64,11 +73,27 @@ Project-Panopticon/
 │   │   ├── 03_core_data_engineering_curriculum.md # 8 Core DE Lakehouse Superpowers
 │   │   ├── 04_interview_guide_and_academic_defense.md # STAR Stories & Defense Q&A
 │   │   └── 05_deployment_guide_and_troubleshooting.md # Operations Manual & OOM Mitigation
+│   ├── finops_cost_evaluation.md              # Final FinOps, Architecture & Spark Execution Report
 │   └── assets/                                # Architectural & schema diagram assets
 │       ├── architecture_diagram.png           # End-to-end Medallion architecture visual
 │       ├── star_schema_diagram.png            # Dimensional Star Schema ER diagram
-│       └── dashboard_mockup.png               # Power BI / Tableau Watchtower Command Center
+│       ├── dashboard_mockup.png               # Production Power BI Watchtower capture
+│       ├── powerbi_page1_executive_watchtower.png # Page 1: Sovereign Executive Watchtower
+│       ├── powerbi_page2_protocol_forensics.png   # Page 2: Protocol Interdiction & DPI Forensics
+│       ├── powerbi_page3_circadian_curfew.png     # Page 3: Circadian Temporal Anomaly & Curfew
+│       └── powerbi_page4_lakehouse_finops.png     # Page 4: Delta Lakehouse FinOps & Audit Ledger
 ├── data/
+│   ├── powerbi_export/                        # Refreshed Gold & Audit CSV data for Power BI
+│   │   ├── fact_network_measurement.csv       # Complete 1:1 measurement event fact (1,000 rows)
+│   │   ├── fact_network_anomaly.csv           # Filtered anomalous interdictions (529 rows)
+│   │   ├── agg_daily_censorship_severity.csv  # Precomputed daily CAI mart
+│   │   ├── agg_hourly_censorship_severity.csv # Precomputed hourly diurnal mart
+│   │   ├── dim_country_region.csv             # UN Geoscheme & RSF Press Freedom index
+│   │   ├── dim_isp_telecom.csv                # Autonomous System ISP classification
+│   │   ├── dim_content_category.csv           # Citizen Lab content categories & risk tiers
+│   │   ├── dim_date.csv                       # Conformed calendar dimension
+│   │   ├── dim_date_time.csv                  # 24-hour diurnal grid dimension
+│   │   └── pipeline_execution_logs.csv        # Centralized audit trail (63 logged batches)
 │   ├── samples/                               # Lightweight local fixtures for testing & CI
 │   │   ├── sample_full_load_ooni.json         # Raw telemetry fixture (~222 KB, 15 records)
 │   │   ├── sample_incremental_ooni.json       # Incremental telemetry fixture (~865 KB, 10 records)
@@ -84,11 +109,12 @@ Project-Panopticon/
 │   ├── 00_config.py                           # Central configuration, DBFS/local paths & API endpoints
 │   ├── 00_audit_logger.py                     # Context manager & operational Delta logger
 │   ├── 01_bronze_ingestion.py                 # Schema-on-read ingestion + quarantine + metadata
-│   ├── 02_silver_transformation.py            # PII masking, array flattening & Delta MERGE
-│   ├── 03_gold_dimensional_modeling.py       # Star Schema dimensional modeling & rollups
-│   └── run_pipeline.py                        # Parameterized runner (Incremental vs Backfill)
+│   ├── 02_silver_transformation.ipynb         # PII masking, array flattening & Delta MERGE
+│   ├── 03_gold_dimensional_modeling.ipynb     # Star Schema dimensional modeling & Z-ORDER marts
+│   ├── 04_master_pipeline.ipynb               # Master end-to-end pipeline orchestrator
+│   └── run_pipeline.py                        # Standalone CLI pipeline runner
 └── tests/                                     # Comprehensive testing & validation suite
-    ├── test_phase1_bronze_isolation.py        # 27 unit/integration tests (local & Databricks runnable)
+    ├── test_phase1_bronze_isolation.py        # 33 unit/integration tests (local & Databricks runnable)
     └── troubleshooting/                       # Databricks Genie audit & serverless migration notes
         └── serverless-test-migration.md       # Root-cause analysis & Genie test enhancements
 ```
@@ -121,6 +147,21 @@ Project-Panopticon/
   - `silver_tcp_experiments`: Exploded TCP connection attempts, destination ports, and reset flags (`tcp_experiment_id` PK).
   - `silver_app_anomaly_measurements`: Exploded non-web app probes (WhatsApp, Telegram, Signal, Tor, Psiphon) (`app_measurement_id` PK).
 
+### Gold Layer: Star Schema & Censorship Aggression Marts
+* **Storage**: Delta Lake (Snappy Compressed) | Co-located and clustered via `OPTIMIZE ... ZORDER BY (country_code, date_key, asn_id)`
+* **Fact Tables**:
+  - `fact_network_measurement`: Complete 1:1 grain per probe measurement (1,000 rows in primary benchmark load), preserving benign baseline measurements for un-distorted Censorship Aggression Index (CAI) calculation.
+  - `fact_network_anomaly`: Filtered anomalous interdiction events (529 rows), enriched with DPI attack vectors, HTTP status codes, and test runtimes.
+* **Dimension Tables**:
+  - `dim_country_region`: ISO 3166-1 alpha-2 country codes, UN geoschemes, and RSF Press Freedom Index tiers.
+  - `dim_isp_telecom`: Autonomous System Numbers (ASN), provider brand names, and state-owned vs. private ownership classification.
+  - `dim_content_category`: 31 Citizen Lab category codes (`NEWS`, `POLITICAL_OPPOSITION`, `VPN`), sensitivity descriptions, and legal risk tiers (`HIGH`, `MEDIUM`, `LOW`).
+  - `dim_date`: Conformed calendar dimension with ISO dates, quarters, months, and weekend indicators.
+  - `dim_date_time`: Full 24-hour diurnal grid dimension (`dates × 24 hours`) ensuring blackout periods register as absence of signal rather than missing rows.
+* **Pre-Aggregated Analytical Marts**:
+  - `agg_daily_censorship_severity`: Daily rollups computing the Censorship Aggression Index ($\text{CAI} = \frac{\text{Tampered}}{\text{Total}} \times 100$) sliced by Country, Carrier, and Content Category.
+  - `agg_hourly_censorship_severity`: Hourly diurnal rollups capturing state-enforced nocturnal curfews and anomaly spikes.
+
 ### Operational Logs: `pipeline_execution_logs` (Governance & Auditing)
 * **Storage**: Delta Lake (**MERGE-based write pattern** — not append-only; each pipeline run opens with a `status='Running'` insert, then MERGEs final metrics on `log_id` at completion, ensuring exactly one row per run)
 * **Primary Key**: `log_id` (UUID)
@@ -139,11 +180,14 @@ Because probe runners include investigative journalists, civil dissidents, and h
 
 ---
 
-## 📈 Key Dashboards & Business Questions
-1. **Regulatory Enforcement Latency**: Which ISPs comply immediately with state ban directives vs. which ones delay, resist, or lack technical DPI infrastructure?
-2. **Surgical Censorship vs. Collateral Damage**: Measuring the empirical ratio of targeted political blocks to unintended disruptions in domestic banking and e-commerce infrastructure.
-3. **Attack Vector Fingerprints**: Categorizing Layer 3/4 TCP reset injections vs. Layer 7 DNS/TLS tampering to reveal the sophistication of the national censorship apparatus.
-4. **Crisis Timeline & Blackout Predictor**: Rolling Z-score anomaly detection to forecast nationwide blackouts before telecommunications go completely dark.
+## 📈 Production Power BI Surveillance Watchtower Suite
+
+The Gold dimensional lakehouse directly powers a 4-page interactive Power BI Watchtower suite ([dashboards/Panopticon_Dashboard.pbip](dashboards/Panopticon_Dashboard.pbip)) configured with an executive high-contrast theme:
+
+1. **Page 1: Sovereign Executive Watchtower**: Live CAI Defcon Meter (9.90%), Carrier Strategic Intentionality Scatter Matrix (Surgical Censorship vs. Collateral Disruption), Protocol Interdiction Vector Donut, and Societal Vulnerability Treemap.
+2. **Page 2: Protocol Interdiction & DPI Forensics**: 100% Stacked DPI Fingerprint across Carriers, Human Rights Risk Tier Funnel (282 Low $\rightarrow$ 176 High $\rightarrow$ 71 Medium), Attack Matrix, and Atomic Fact Evidence Stream.
+3. **Page 3: Circadian Temporal Anomaly & Curfew Waveform**: Dual-axis Diurnal Waveform (Total Probes vs. Tampered Interdictions) and Nocturnal Cumulative Anomaly Curve exposing state-ordered curfew spikes (21:00–02:00 PKT).
+4. **Page 4: Delta Lakehouse Architecture & FinOps Audit**: Pipeline Latency Waterfall (Bronze $\rightarrow$ Silver $\rightarrow$ Gold), Medallion Layer Ingestion Throughput (3K Bronze, 5.5K Silver, 1.7K Gold), ACID Commit Verification (82.5%), and $0.00 Serverless Cost Governance.
 
 ---
 
@@ -153,11 +197,12 @@ All formal technical documentation and implementation manuals are organized in t
 
 | Folder | Document | Description & Contents |
 | :--- | :--- | :--- |
-| **Phase 1** | [**Docs/Phase 1/phase1_proposal.md**](Docs/Phase%201/phase1_proposal.md) | **Formal Phase 1 Academic Proposal** (Course requirements, Sizing, Medallion modeling). |
+| **Phase 1** | [**Docs/Phase 1/phase1_proposal.md**](Docs/Phase%201/phase1_proposal.md) | **Formal Phase 1 Academic Proposal** (Course requirements, Sizing, Medallion modeling, Figures 3a–3d). |
 | **Classroom** | [**Docs/.docx/phase1_proposal.docx**](Docs/.docx/phase1_proposal.docx) | **Executive Word Document Version** with high-resolution visual diagrams and tables. |
 | **Phase 2** | [**Docs/Phase 2/phase2_implementation_plan.md**](Docs/Phase%202/phase2_implementation_plan.md) | **Phase 2 Technical Blueprint** (Instructor deliverables, engineering milestones). |
-| **Phase 2** | [**Docs/Phase 2/06_data_dictionary.md**](Docs/Phase%202/06_data_dictionary.md) | **Enterprise Data Dictionary** (Bronze, Silver, Quarantine & Log schema contracts). |
+| **Phase 2** | [**Docs/Phase 2/06_data_dictionary.md**](Docs/Phase%202/06_data_dictionary.md) | **Enterprise Data Dictionary** (Bronze, Silver, Gold, Quarantine & Log schema contracts). |
 | **Phase 2** | [**Docs/Phase 2/07_execution_guide.md**](Docs/Phase%202/07_execution_guide.md) | **Parameterized Execution & Backfill Runbook** (CLI/Widget parameters & Delta MERGE). |
+| **FinOps** | [**Docs/finops_cost_evaluation.md**](Docs/finops_cost_evaluation.md) | **Final Architecture, Spark Execution & FinOps Report** (63-run empirical audit & $0.00 spend). |
 | **Reference** | [**Docs/Future & Reference/01_architectures_and_tech_stacks.md**](Docs/Future%20&%20Reference/01_architectures_and_tech_stacks.md) | **Architecture & Tech Stack Evaluation** (Databricks vs. Local vs. Azure trade-offs). |
 | **Reference** | [**Docs/Future & Reference/02_phased_implementation_and_work_division.md**](Docs/Future%20&%20Reference/02_phased_implementation_and_work_division.md) | **Phased Sprint Plan & Teammate Work Division** (Tasks for Muhammad & Safee). |
 | **Reference** | [**Docs/Future & Reference/03_core_data_engineering_curriculum.md**](Docs/Future%20&%20Reference/03_core_data_engineering_curriculum.md) | **8 Core Data Engineering Superpowers** (PySpark JSON explode, Delta CDC, Z-Order). |
@@ -168,25 +213,32 @@ All formal technical documentation and implementation manuals are organized in t
 
 ## ⚡ Quickstart Execution
 
-### Triggering Daily Incremental Run vs. Historical Backfill
-Pipelines support execution via **Databricks Widgets** or terminal **CLI arguments**:
+### 1. Interactive Master Pipeline (Databricks Serverless / Community Edition)
+Open `notebooks/04_master_pipeline.ipynb` in your Databricks workspace and click **Run All**:
+- Configurable interactive widgets: `batch_date`, `load_type` (`full`, `incremental`, `backfill`), `country_code` (`PK`, `IR`, `RU`), `max_records`, and `lookback_days`.
+- Automatically orchestrates Stage 1 (Bronze Ingestion), Stage 2 (Silver Transformation), and Stage 3 (Gold Dimensional Modeling) with centralized audit logging in `pipeline_execution_logs`.
+
+### 2. Standalone CLI Execution (Local & Automation)
+Pipelines can also be triggered via terminal CLI arguments using the standalone runner:
 
 ```bash
 # Standard Daily Incremental Execution
 python notebooks/run_pipeline.py \
     --batch-date "2026-09-28" \
-    --load-type "incremental"
+    --load-type "incremental" \
+    --country-code "PK"
 
 # Parameterized Historical Backfill
 python notebooks/run_pipeline.py \
     --batch-date "2026-09-22" \
-    --load-type "backfill"
+    --load-type "backfill" \
+    --country-code "IR"
 ```
 
-### Running the Test Suite (27 Unit & Integration Tests)
+### 3. Running the Test Suite (33 Unit & Integration Tests)
 The test suite validates schema enforcement, partition safety, manifest integrity, and isolation contracts:
 ```bash
-# Run tests offline without PySpark installed (all 11 offline unit tests pass in < 0.01s)
+# Run offline unit tests locally without PySpark (< 0.05s)
 python -m unittest tests/test_phase1_bronze_isolation.py
 
 # On Databricks Community Edition / Serverless:
